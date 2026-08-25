@@ -35,6 +35,9 @@ __pycache__/
 *.tar.gz
 *.zst
 *.sha256
+# 例外：WenetSpeech M 的下载清单/manifest（39MB），没有它 download_wenetspeech_m_official.sh
+# 跑不起来，而它又无法从公开源重新生成，必须随仓库走。
+!scripts/download/wenet_m_metadata.tar.zst
 
 # ── 编辑与备份产物
 *.bak
