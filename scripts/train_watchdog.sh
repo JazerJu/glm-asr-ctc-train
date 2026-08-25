@@ -15,7 +15,11 @@ say() { echo "$(date '+%F %T') $*" | tee -a "$LOG"; }
 say "看门狗启动，实例 $INST，每 120 秒轮询"
 miss=0
 while true; do
-  out=$($SSH "$HOST" 'pgrep -fc "train_ddp.py" 2>/dev/null || echo 0' 2>/dev/null)
+  # 注意：不能用 pgrep -f "train_ddp.py"——远端执行这条命令时，命令行本身
+  # 也含该字符串，会把自己数进去，导致计数永远 >=1、收尾永不触发。
+  # 2026-08-25 就是因此让机器在训练结束后空转了 8 小时。
+  # 改用 ps + awk 只匹配「python 启动且参数含 train_ddp.py」的进程。
+  out=$($SSH "$HOST" 'ps -eo args | awk '"'"'$1 ~ /python/ && $0 ~ /train_ddp\.py/'"'"' | wc -l' 2>/dev/null)
   rc=$?
   if [ $rc -ne 0 ] || [ -z "$out" ]; then
     say "SSH 失败（不计入判定，继续等）"
@@ -46,7 +50,7 @@ while true; do
   # 先停掉常驻上传器：它和下面的 --once 会并发写同一个状态文件，
   # 而状态文件的读取在 try/except 之外，写坏了会让收尾上传直接崩。
   say "停止常驻上传器，避免与收尾上传争用状态文件"
-  $SSH "$HOST" 'pkill -CONT -f scripts/ckpt_uploader.py 2>/dev/null; pkill -f scripts/ckpt_uploader.py 2>/dev/null; sleep 3; echo "残留 $(pgrep -fc scripts/ckpt_uploader.py 2>/dev/null || echo 0)"' 2>&1 | tail -1 | tee -a "$LOG"
+  $SSH "$HOST" 'for p in $(ps -eo pid,args | awk '"'"'$2 ~ /python/ && $0 ~ /ckpt_uploader\.py/ {print $1}'"'"'); do kill -CONT $p 2>/dev/null; kill $p 2>/dev/null; done; sleep 3; echo "残留 $(ps -eo args | awk '"'"'$1 ~ /python/ && $0 ~ /ckpt_uploader\.py/'"'"' | wc -l)"' 2>&1 | tail -1 | tee -a "$LOG"
   # 状态文件若已损坏，备份后清空，让收尾上传从零重扫（W&B 按内容去重，重复上传不浪费）
   $SSH "$HOST" 'cd /workspace/ctc && python3 -c "
 import json,pathlib,shutil
