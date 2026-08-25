@@ -1,0 +1,43 @@
+# ── 模型权重与数据（体积大，走 W&B artifact，不进 git）
+*.pt
+*.pth
+*.ckpt
+checkpoints/
+remote_checkpoints/
+output/
+manifests/
+runs/
+wandb/
+
+# ── 日志
+logs/
+*.log
+profiles/
+
+# ── 凭据（绝不提交）
+.env
+.env.*
+.secrets/
+*.netrc
+!.env.example
+
+# ── 环境与缓存
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.so
+.upload_cache/
+.uploaded_ckpts.json*
+
+# ── 数据集元数据压缩包
+*.tar.zst
+*.tar.gz
+*.zst
+*.sha256
+
+# ── 编辑与备份产物
+*.bak
+*.bak[0-9]
+*.tmp
+_pre_merge_backup_*/

@@ -1,0 +1,9 @@
+{
+  "subset": "M",
+  "manifest": "/data/datasets/wenetspeech_m/metadata/m_manifest.jsonl",
+  "download_list": "/data/datasets/wenetspeech_m/metadata/m_download_list.txt",
+  "books": "/data/datasets/wenetspeech_m/metadata/m_books.txt",
+  "segments": 1514500,
+  "hours": 1000.34,
+  "packages": 240
+}
