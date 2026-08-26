@@ -131,51 +131,71 @@ def build_librispeech(root: str, lang: str = "en", splits: list[str] | None = No
 
 
 
+def _build_kspon_one_file(args):
+    """解一个 KsponSpeech parquet。给 ProcessPoolExecutor 用，必须是模块级函数。"""
+    import pyarrow.parquet as pq
+
+    parquet_path, audio_root, lang = args
+    parquet_path = Path(parquet_path)
+    split = parquet_path.name.split("-", 1)[0]
+    split_dir = Path(audio_root) / split
+    split_dir.mkdir(parents=True, exist_ok=True)
+
+    samples = []
+    n = 0
+    parquet_file = pq.ParquetFile(parquet_path)
+    for row_group_idx in range(parquet_file.num_row_groups):
+        table = parquet_file.read_row_group(row_group_idx, columns=["audio", "sentence", "id"])
+        for row in table.to_pylist():
+            item_id = str(row.get("id") or f"{parquet_path.stem}_{n}")
+            text = clean_kspon_text(row.get("sentence") or "")
+            audio = row.get("audio") or {}
+            audio_bytes = audio.get("bytes") if isinstance(audio, dict) else None
+            if not text or not audio_bytes:
+                continue
+            ext = ".wav"
+            if audio_bytes.startswith(b"fLaC"):
+                ext = ".flac"
+            elif audio_bytes.startswith(b"OggS"):
+                ext = ".ogg"
+            audio_path = split_dir / f"{item_id}{ext}"
+            # 已解出且大小一致就跳过 —— 中断后重跑等于续传
+            if not audio_path.exists() or audio_path.stat().st_size != len(audio_bytes):
+                audio_path.write_bytes(audio_bytes)
+            samples.append({
+                "audio_path": str(audio_path),
+                "text": text,
+                "lang": lang,
+                "utt_id": item_id,
+                "split": split,
+            })
+            n += 1
+    return samples
+
+
 def build_ksponspeech(root: str, lang: str = "ko") -> list[dict]:
     root = Path(root)
     parquet_files = sorted((root / "data").glob("*.parquet"))
     if parquet_files:
-        import pyarrow.parquet as pq
+        # 解 ~60 万条内嵌音频是纯 CPU/IO 活，且各 parquet 互不依赖。
+        # 原来是串行 for 循环，在 192 核的机器上只吃满 1 核；改成一文件一进程。
+        from concurrent.futures import ProcessPoolExecutor, as_completed
 
         audio_root = root / "audio"
         audio_root.mkdir(parents=True, exist_ok=True)
+        workers = min(len(parquet_files), max(1, os.cpu_count() or 1))
+        logger.info(f"KsponSpeech: {len(parquet_files)} 个 parquet，{workers} 进程并行")
+
         samples = []
-        total_rows = 0
-
-        for parquet_path in parquet_files:
-            split = parquet_path.name.split("-", 1)[0]
-            split_dir = audio_root / split
-            split_dir.mkdir(parents=True, exist_ok=True)
-            parquet_file = pq.ParquetFile(parquet_path)
-
-            for row_group_idx in range(parquet_file.num_row_groups):
-                table = parquet_file.read_row_group(row_group_idx, columns=["audio", "sentence", "id"])
-                for row in table.to_pylist():
-                    item_id = str(row.get("id") or f"{parquet_path.stem}_{total_rows}")
-                    raw_text = row.get("sentence") or ""
-                    text = clean_kspon_text(raw_text)
-                    audio = row.get("audio") or {}
-                    audio_bytes = audio.get("bytes") if isinstance(audio, dict) else None
-                    if not text or not audio_bytes:
-                        continue
-                    ext = ".wav"
-                    if audio_bytes.startswith(b"fLaC"):
-                        ext = ".flac"
-                    elif audio_bytes.startswith(b"OggS"):
-                        ext = ".ogg"
-                    audio_path = split_dir / f"{item_id}{ext}"
-                    if not audio_path.exists() or audio_path.stat().st_size != len(audio_bytes):
-                        audio_path.write_bytes(audio_bytes)
-                    samples.append({
-                        "audio_path": str(audio_path),
-                        "text": text,
-                        "lang": lang,
-                        "utt_id": item_id,
-                        "split": split,
-                    })
-                    total_rows += 1
-
-            logger.info(f"KsponSpeech parquet {parquet_path.name}: cumulative {len(samples)} samples")
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_build_kspon_one_file, (str(p), str(audio_root), lang)): p
+                       for p in parquet_files}
+            for i, future in enumerate(as_completed(futures), 1):
+                p = futures[future]
+                got = future.result()
+                samples.extend(got)
+                logger.info(f"KsponSpeech: {i}/{len(parquet_files)} 完成 ({p.name}, "
+                            f"{len(got)} 条，累计 {len(samples)})")
 
         logger.info(f"KsponSpeech parquet: {len(samples)} samples from {len(parquet_files)} shards")
         return samples
@@ -821,29 +841,36 @@ MLS_LANG_MAP = {
     "mls_polish": "pl",
 }
 
+# 语料根目录。换机器时用 DATA_ROOT 覆盖，不必改这张表：
+#     DATA_ROOT=/remote-home/wy008/data python prepare_manifests.py --all
+DATA_ROOT = os.environ.get("DATA_ROOT", "/data/datasets")
+
 DEFAULT_PATHS = {
-    "aishell1": ("/data/datasets/data_aishell", "zh", ["train"]),
-    "wenetspeech": ("/data/datasets/wenetspeech_m", "zh", None),
-    "magicdata": ("/data/datasets/magicdata", "zh", None),
-    "cv_yue": ("/data/datasets/cv-corpus-26.0-2026-06-12/yue", "yue", ["validated"]),
-    "cv_zh_hk": ("/data/datasets/cv-corpus-26.0-2026-06-12/zh-HK", "zh-HK", ["validated"]),
-    "librispeech": ("/data/datasets/librispeech/LibriSpeech", "en", ["train-clean-100", "train-clean-360", "train-other-500"]),
-    "ksponspeech": ("/data/datasets/ksponspeech", "ko", None),
-    "cv_ja": ("/data/datasets/cv-corpus-26.0-2026-06-12/ja", "ja", ["validated"]),
-    "mls_german": ("/data/datasets/mls_german_opus", "de", None),
-    "mls_dutch": ("/data/datasets/mls_dutch_opus", "nl", None),
-    "mls_french": ("/data/datasets/mls_french_opus", "fr", None),
-    "mls_spanish": ("/data/datasets/mls_spanish_opus", "es", None),
-    "mls_italian": ("/data/datasets/mls_italian_opus", "it", None),
-    "mls_portuguese": ("/data/datasets/mls_portuguese_opus", "pt", None),
-    "mls_polish": ("/data/datasets/mls_polish_opus", "pl", None),
-    "cv_zh_tw": ("/data/datasets/cv-corpus-26.0-2026-06-12/zh-TW", "zh-TW", ["validated"]),
-    # 2026-08 round. Paths are placeholders until the corpora land on the
-    # training box; override with --root.
-    "talcs": ("/data/datasets/talcs", "zh-en", ["train_set", "dev_set", "test_set"]),
-    "cs_dialogue": ("/data/datasets/cs_dialogue", "zh-en", ["train", "dev", "test"]),
-    "ascend": ("/data/datasets/ascend", "zh-en", ["train"]),
-    "gigaspeech": ("/data/datasets/gigaspeech", "en", ["m"]),
+    "aishell1": (f"{DATA_ROOT}/data_aishell", "zh", ["train"]),
+    # 新布局（从 HF 的 L 分片筛出 M）：cuts jsonl 和 wav 都在 audio/ 下，root
+    # 必须指到 audio/；指到外层会让 jsonl 里的相对路径解析不到任何文件。
+    "wenetspeech": (f"{DATA_ROOT}/wenetspeech_m/audio", "zh", None),
+    "magicdata": (f"{DATA_ROOT}/magicdata", "zh", None),
+    "cv_yue": (f"{DATA_ROOT}/cv-corpus-26.0-2026-06-12/yue", "yue", ["validated"]),
+    "cv_zh_hk": (f"{DATA_ROOT}/cv-corpus-26.0-2026-06-12/zh-HK", "zh-HK", ["validated"]),
+    # 注意是 .../librispeech/LibriSpeech：tarball 自带一层 LibriSpeech/ 目录，
+    # root 传外层会让具名 split 全部落空、回退成递归扫描，把 dev/test 也算进来。
+    "librispeech": (f"{DATA_ROOT}/librispeech/LibriSpeech", "en", ["train-clean-100", "train-clean-360", "train-other-500"]),
+    "ksponspeech": (f"{DATA_ROOT}/ksponspeech", "ko", None),
+    "cv_ja": (f"{DATA_ROOT}/cv-corpus-26.0-2026-06-12/ja", "ja", ["validated"]),
+    "mls_german": (f"{DATA_ROOT}/mls_german_opus", "de", None),
+    "mls_dutch": (f"{DATA_ROOT}/mls_dutch_opus", "nl", None),
+    "mls_french": (f"{DATA_ROOT}/mls_french_opus", "fr", None),
+    "mls_spanish": (f"{DATA_ROOT}/mls_spanish_opus", "es", None),
+    "mls_italian": (f"{DATA_ROOT}/mls_italian_opus", "it", None),
+    "mls_portuguese": (f"{DATA_ROOT}/mls_portuguese_opus", "pt", None),
+    "mls_polish": (f"{DATA_ROOT}/mls_polish_opus", "pl", None),
+    "cv_zh_tw": (f"{DATA_ROOT}/cv-corpus-26.0-2026-06-12/zh-TW", "zh-TW", ["validated"]),
+    # 2026-08 round.
+    "talcs": (f"{DATA_ROOT}/talcs", "zh-en", ["train_set", "dev_set", "test_set"]),
+    "cs_dialogue": (f"{DATA_ROOT}/cs_dialogue", "zh-en", ["train", "dev", "test"]),
+    "ascend": (f"{DATA_ROOT}/ascend", "zh-en", ["train"]),
+    "gigaspeech": (f"{DATA_ROOT}/gigaspeech", "en", ["m"]),
 }
 
 
