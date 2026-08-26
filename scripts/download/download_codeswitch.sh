@@ -55,7 +55,10 @@ do_talcs() {
 do_cs_dialogue() {
   local root="$DATA_DIR/cs_dialogue"
   say "CS-Dialogue (104h 自发对话, BAAI) -> $root  [只取 short_wav]"
-  dl BAAI/CS-Dialogue dataset "$root" "data/index/short_wav/*" "data/short_wav/*"
+  # 注意 index 用 ** 而不是 *：索引文件在 data/index/short_wav/{train,dev,test}/ 里，
+  # 再下一层才是 text/wav.scp，单星号只匹配到目录名、拿不到文件（实测漏下 6 个索引
+  # 文件，导致 build_cs_dialogue 解析出 0 条）。
+  dl BAAI/CS-Dialogue dataset "$root" "data/index/**" "data/short_wav/*"
   if [ ! -d "$root/data/short_wav/S0001" ] && ls "$root"/data/short_wav/short_wav.tar.gz* >/dev/null 2>&1; then
     say "解包 short_wav（压缩包顶层是 short_wav/，解到 data/ 才能对上 wav.scp）"
     cat "$root"/data/short_wav/short_wav.tar.gz* | tar xzf - -C "$root/data/"

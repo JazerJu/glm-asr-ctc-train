@@ -308,6 +308,42 @@ def build_mls(root: str, lang: str, splits: list[str] = None) -> list[dict]:
 
 def build_magicdata(root: str, lang: str = "zh") -> list[dict]:
     root = Path(root)
+
+    # OpenSLR-68 tarball layout (verified against the real download 2026-08-26):
+    #     <root>/{train,dev,test}/TRANS.txt        TSV: UtteranceID \t SpeakerID \t Transcription
+    #     <root>/{train,dev,test}/<SpeakerID>/<UtteranceID>.wav
+    # There is no .scp file anywhere and TRANS.txt sits one level down, so both
+    # branches below miss it entirely and the builder silently returned 0 samples.
+    split_trans = [(sp, root / sp / "TRANS.txt") for sp in ("train", "dev", "test")]
+    split_trans = [(sp, f) for sp, f in split_trans if f.exists()]
+    if split_trans:
+        samples = []
+        for split, trans_file in split_trans:
+            matched = missing = 0
+            with trans_file.open("r", encoding="utf-8") as f:
+                reader = csv.DictReader(f, delimiter="\t")
+                for row in reader:
+                    utt_id = (row.get("UtteranceID") or "").strip()
+                    speaker = (row.get("SpeakerID") or "").strip()
+                    text = (row.get("Transcription") or "").strip()
+                    if not utt_id or not text:
+                        continue
+                    audio_path = root / split / speaker / utt_id
+                    if not audio_path.exists():
+                        missing += 1
+                        continue
+                    samples.append({
+                        "audio_path": str(audio_path),
+                        "text": text.replace(" ", ""),
+                        "lang": lang,
+                        "utt_id": utt_id[:-4] if utt_id.endswith(".wav") else utt_id,
+                        "split": split,
+                    })
+                    matched += 1
+            logger.info(f"MAGICDATA {split}: {matched} matched, {missing} without audio")
+        logger.info(f"MAGICDATA split/TRANS: {len(samples)} samples from {root}")
+        return samples
+
     scp_files = sorted(root.glob("*.scp"))
     if scp_files:
         samples = []
