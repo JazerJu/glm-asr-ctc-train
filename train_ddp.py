@@ -28,14 +28,45 @@ logger = logging.getLogger(__name__)
 
 @contextmanager
 def nvtx_range(name, enabled=False):
-    if not enabled or not torch.cuda.is_available():
+    if not enabled or device_type() != "cuda":
         yield
         return
-    torch.cuda.nvtx.range_push(name)
+    torch.cuda.nvtx.range_push(name)  # 仅 CUDA；上面已按 device_type 提前返回
     try:
         yield
     finally:
         torch.cuda.nvtx.range_pop()
+
+
+# ---------------------------------------------------------------------------
+# 设备抽象。这份脚本原本只跑 CUDA；昇腾 910B 上 torch_npu 提供 torch.npu.*，
+# 集合通信后端是 hccl 而非 nccl，autocast 的 device_type 也要跟着换。
+# ---------------------------------------------------------------------------
+_DEVICE_TYPE = None
+
+
+def device_type() -> str:
+    """返回 "cuda" / "npu" / "cpu"。torch_npu 必须先 import 才会注册 torch.npu。"""
+    global _DEVICE_TYPE
+    if _DEVICE_TYPE is None:
+        if torch.cuda.is_available():
+            _DEVICE_TYPE = "cuda"
+        else:
+            try:
+                import torch_npu  # noqa: F401
+                _DEVICE_TYPE = "npu" if torch.npu.is_available() else "cpu"
+            except Exception:
+                _DEVICE_TYPE = "cpu"
+    return _DEVICE_TYPE
+
+
+def accel():
+    """torch.cuda 或 torch.npu 模块本身，用于 set_device / synchronize / 显存查询。"""
+    return getattr(torch, device_type())
+
+
+def dist_backend() -> str:
+    return {"cuda": "nccl", "npu": "hccl"}.get(device_type(), "gloo")
 
 
 def setup_ddp(disabled=False):
@@ -43,7 +74,7 @@ def setup_ddp(disabled=False):
         local_rank = 0
         rank = 0
         world_size = 1
-        torch.cuda.set_device(local_rank)
+        accel().set_device(local_rank)
         return local_rank, rank, world_size
 
     if "RANK" not in os.environ:
@@ -53,12 +84,12 @@ def setup_ddp(disabled=False):
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "29500"
 
-    nccl_timeout_min = int(os.environ.get("NCCL_TIMEOUT_MIN", "60"))
-    dist.init_process_group("nccl", timeout=timedelta(minutes=nccl_timeout_min))
+    timeout_min = int(os.environ.get("NCCL_TIMEOUT_MIN", "60"))
+    dist.init_process_group(dist_backend(), timeout=timedelta(minutes=timeout_min))
     local_rank = int(os.environ["LOCAL_RANK"])
     rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
-    torch.cuda.set_device(local_rank)
+    accel().set_device(local_rank)
     return local_rank, rank, world_size
 
 
@@ -516,7 +547,7 @@ class CTCTrainer:
     @torch.no_grad()
     def extract_encoder_features(self, input_features):
         self._load_encoder()
-        with torch.amp.autocast("cuda", dtype=self.dtype):
+        with torch.amp.autocast(device_type(), dtype=self.dtype):
             audio_out = self.encoder.audio_tower(input_features.to(self.device))
         if self.keep_encoder_bf16:
             return audio_out.last_hidden_state
@@ -556,7 +587,7 @@ class CTCTrainer:
             )
             with sync_context:
                 with nvtx_range("02_decoder_forward_to_logits", self.nvtx_profile):
-                    with torch.amp.autocast("cuda", dtype=self.dtype):
+                    with torch.amp.autocast(device_type(), dtype=self.dtype):
                         logits = model(encoder_out, use_blocks=self.use_blocks)
                 with nvtx_range("03_ctc_log_probs", self.nvtx_profile):
                     log_probs = self.ctc_log_probs(logits)
@@ -909,12 +940,14 @@ def main():
     args = parser.parse_args()
 
     local_rank, rank, world_size = setup_ddp(disabled=args.no_ddp)
-    device = torch.device(f"cuda:{local_rank}")
+    device = torch.device(f"{device_type()}:{local_rank}")
 
     if is_rank0() and world_size > 1:
         p2p = os.environ.get("NCCL_P2P_LEVEL")
         if p2p:
             logger.info(f"NCCL_P2P_LEVEL={p2p}")
+        elif device_type() != "cuda":
+            pass  # 昇腾走 HCCS 全互联，没有这个开关
         else:
             logger.warning(
                 "NCCL_P2P_LEVEL is unset. On a multi-NUMA host without NVLink, NCCL "
@@ -924,8 +957,13 @@ def main():
             )
     if is_rank0():
         logger.info(f"DDP: rank={rank}, world_size={world_size}, device={device}")
-        logger.info(f"GPU: {torch.cuda.get_device_name(local_rank)}")
-        logger.info(f"VRAM: {torch.cuda.get_device_properties(local_rank).total_memory / 1e9:.1f} GB")
+        try:
+            props = accel().get_device_properties(local_rank)
+            name = getattr(props, "name", None) or accel().get_device_name(local_rank)
+            total = getattr(props, "total_memory", 0)
+            logger.info(f"加速器: {name}  显存 {total / 1e9:.1f} GB")
+        except Exception as exc:  # 不同后端属性名不一致，取不到不该拦住训练
+            logger.info(f"加速器: {device_type()}:{local_rank} (属性读取失败: {exc})")
 
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=True)
