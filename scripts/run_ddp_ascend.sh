@@ -77,6 +77,24 @@ SAVE_DIR="${SAVE_DIR:-checkpoints}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-2000}"
 KEEP_LAST="${KEEP_LAST:-5}"
 
+# ── W&B ────────────────────────────────────────────────────────────────
+# 新 project：这轮换了模型（GLM-ASR -> Qwen3-ASR）和词表（59,264 -> 72,468），
+# loss 尺度和上一轮不可比，混在同一个 project 里曲线没法看。
+WANDB_PROJECT="${WANDB_PROJECT:-qwen3-asr-ctc}"
+WANDB_KEY_FILE="${WANDB_KEY_FILE:-$REPO_ROOT/.secrets/wandb_key}"
+EXTRA_ARGS="${EXTRA_ARGS:-}"
+if [ "${ENABLE_WANDB:-1}" = "1" ]; then
+    if [ -z "${WANDB_API_KEY:-}" ] && [ -f "$WANDB_KEY_FILE" ]; then
+        WANDB_API_KEY="$(cat "$WANDB_KEY_FILE")"
+        export WANDB_API_KEY
+    fi
+    if [ -n "${WANDB_API_KEY:-}" ]; then
+        EXTRA_ARGS="$EXTRA_ARGS --wandb --wandb-project $WANDB_PROJECT"
+    else
+        echo "[warn] 没有 W&B key（$WANDB_KEY_FILE），本轮不上报" >&2
+    fi
+fi
+
 DEFAULT_MANIFESTS="manifests/aishell1.jsonl,manifests/wenetspeech.jsonl,manifests/magicdata.jsonl,manifests/cv_yue.jsonl,manifests/cv_zh_hk.jsonl,manifests/librispeech.jsonl,manifests/ksponspeech.jsonl,manifests/cv_ja.jsonl,manifests/mls_german.jsonl,manifests/mls_dutch.jsonl,manifests/mls_french.jsonl,manifests/mls_spanish.jsonl,manifests/mls_italian.jsonl,manifests/mls_portuguese.jsonl,manifests/mls_polish.jsonl,manifests/cv_zh_tw.jsonl,manifests/talcs.jsonl,manifests/talcs.jsonl,manifests/talcs.jsonl,manifests/cs_dialogue.jsonl,manifests/cs_dialogue.jsonl,manifests/cs_dialogue.jsonl,manifests/ascend.jsonl,manifests/ascend.jsonl,manifests/ascend.jsonl,manifests/gigaspeech.jsonl"
 MANIFESTS="${MANIFESTS:-$DEFAULT_MANIFESTS}"
 
@@ -123,5 +141,6 @@ exec torchrun --standalone --nnodes=1 --nproc_per_node="$NPROC" \
     --save-dir "$SAVE_DIR" --save-interval "$SAVE_INTERVAL" \
     --keep-last-checkpoints "$KEEP_LAST" \
     --no-nvtx-profile \
+    $EXTRA_ARGS \
     `# 不传 --compile-decoder：昇腾环境无 triton，inductor 后端会报 ModuleNotFoundError` \
     "$@"
