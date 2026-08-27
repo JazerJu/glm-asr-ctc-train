@@ -69,6 +69,16 @@ def dist_backend() -> str:
     return {"cuda": "nccl", "npu": "hccl"}.get(device_type(), "gloo")
 
 
+import faulthandler
+import signal
+
+# 容器里没有 SYS_PTRACE，py-spy/gdb 都用不了。挂个 SIGUSR1 处理器，
+# 卡死时 `kill -USR1 <pid>` 就能把所有线程的 Python 栈打到 stderr。
+faulthandler.register(signal.SIGUSR1, all_threads=True)
+
+from model_families import get_family
+
+
 def setup_ddp(disabled=False):
     if disabled:
         local_rank = 0
@@ -186,7 +196,10 @@ class ManifestDataset(Dataset):
     process holds a handful of refcounted objects and the pages stay shared.
     """
 
-    def __init__(self, manifest_paths, tokenizer, target_sr=16000, max_audio_sec=30.0):
+    def __init__(self, manifest_paths, tokenizer, target_sr=16000, max_audio_sec=30.0,
+                 token_map=None, unk_id=None):
+        self.token_map = token_map
+        self.unk_id = unk_id
         self.tokenizer = tokenizer
         self.target_sr = target_sr
         self.max_audio_sec = max_audio_sec
@@ -318,6 +331,10 @@ class ManifestDataset(Dataset):
             # collate_ctc drops these.
             return None
         token_ids = self.tokenizer.encode(self.text(idx), add_special_tokens=False)
+        if self.token_map is not None:
+            # 紧凑词表：原始 tokenizer 照常编码，再过一次 id 映射。
+            # 分词行为不变，只是把稀疏的原 id 压到连续的紧凑 id。
+            token_ids = [self.token_map.get(t, self.unk_id) for t in token_ids]
         return wav, torch.tensor(token_ids, dtype=torch.long)
 
 
@@ -327,11 +344,23 @@ HOP_LENGTH = 160
 ENCODER_SUBSAMPLE = 2
 
 
-def collate_ctc(batch, feature_extractor, blank_id, pad_to_30s=False):
+def collate_ctc(batch, feature_extractor, blank_id, pad_to_30s=False, family=None):
     batch = [b for b in batch if b is not None]
     if not batch:
         return None
     waveforms, token_id_lists = zip(*batch)
+
+    if family is not None:
+        # 家族分派：GLM 出 [B,128,T]，Qwen3 出 [128,ΣT]+feature_lens，
+        # input_lengths 各自按自己的降采样率算（50 fps vs 13 fps）。
+        input_features, feature_lens, input_lengths = family.build_features(
+            list(waveforms), feature_extractor, pad_to_30s
+        )
+        target_lengths = torch.tensor([len(ids) for ids in token_id_lists], dtype=torch.long)
+        targets = nn.utils.rnn.pad_sequence(
+            token_id_lists, batch_first=True, padding_value=blank_id
+        )
+        return input_features, targets, target_lengths, input_lengths, feature_lens
 
     # The extractor pads to its full 30s window by default. Real utterances
     # average well under 6s, so that window is mostly silence the encoder still
@@ -446,7 +475,8 @@ class CTCTrainer:
                  writer=None, wandb_run=None, wandb_log_checkpoints=False,
                  ddp_no_sync=True, keep_encoder_bf16=True, compile_mode="default",
                  bf16_log_softmax=False, fused_adamw=False,
-                 nvtx_profile=False):
+                 nvtx_profile=False, family=None):
+        self.family = family or get_family("glm-asr")
         self.model_id = model_id
         self.tokenizer = tokenizer
         self.feature_extractor = feature_extractor
@@ -534,24 +564,21 @@ class CTCTrainer:
     def _load_encoder(self):
         if self.encoder is not None:
             return
-        from transformers import AutoModel
         if is_rank0():
-            logger.info(f"Loading encoder: {self.model_id}")
-        self.encoder = AutoModel.from_pretrained(
-            self.model_id, trust_remote_code=True, dtype=self.dtype
-        ).to(self.device)
+            logger.info(f"Loading encoder ({self.family.name}): {self.model_id}")
+        self.encoder = self.family.load_encoder(self.model_id, self.dtype, self.device)
         self.encoder.eval()
         for p in self.encoder.parameters():
             p.requires_grad = False
 
     @torch.no_grad()
-    def extract_encoder_features(self, input_features):
+    def extract_encoder_features(self, input_features, feature_lens=None):
         self._load_encoder()
         with torch.amp.autocast(device_type(), dtype=self.dtype):
-            audio_out = self.encoder.audio_tower(input_features.to(self.device))
-        if self.keep_encoder_bf16:
-            return audio_out.last_hidden_state
-        return audio_out.last_hidden_state.float()
+            hidden = self.family.encode(
+                self.encoder, input_features, feature_lens, self.device
+            )
+        return hidden if self.keep_encoder_bf16 else hidden.float()
 
     def ctc_log_probs(self, logits):
         if self.bf16_log_softmax:
@@ -575,9 +602,9 @@ class CTCTrainer:
         for batch_idx, batch in enumerate(dataloader):
             if batch is None:
                 continue
-            input_features, targets, target_lengths, input_lengths = batch
+            input_features, targets, target_lengths, input_lengths, feature_lens = batch
             with nvtx_range("01_encoder_h2d_forward", self.nvtx_profile):
-                encoder_out = self.extract_encoder_features(input_features)
+                encoder_out = self.extract_encoder_features(input_features, feature_lens)
 
             sync_step = (batch_idx + 1) % self.grad_accum == 0
             sync_context = (
@@ -692,8 +719,8 @@ class CTCTrainer:
         for batch in dataloader:
             if batch is None:
                 continue
-            input_features, targets, target_lengths, input_lengths = batch
-            encoder_out = self.extract_encoder_features(input_features)
+            input_features, targets, target_lengths, input_lengths, feature_lens = batch
+            encoder_out = self.extract_encoder_features(input_features, feature_lens)
             logits = model(encoder_out, use_blocks=self.use_blocks)
             log_probs = self.ctc_log_probs(logits)
             input_lengths = input_lengths.clamp(max=log_probs.shape[0])
@@ -804,9 +831,26 @@ class CTCTrainer:
 
 
 def create_feature_extractor(model_id):
-    from transformers import AutoProcessor
-    processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-    return processor.feature_extractor
+    """取音频前端。
+
+    AutoProcessor 对 Qwen3-ASR 返回的是 Qwen2TokenizerFast（没有 feature_extractor
+    属性），对 GLM-ASR 才返回带 feature_extractor 的 processor；而且实测同一路径
+    在不同 transformers 版本下返回类型还会变。所以逐级兜底，最后直接按
+    preprocessor_config.json 加载 WhisperFeatureExtractor（两个模型的音频前端
+    都是它：16kHz / hop 160 / 10ms 一帧）。
+    """
+    from transformers import AutoProcessor, WhisperFeatureExtractor
+    try:
+        processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+    except Exception:
+        processor = None
+    if processor is not None:
+        fe = getattr(processor, "feature_extractor", None)
+        if fe is not None:
+            return fe
+        if hasattr(processor, "sampling_rate") and hasattr(processor, "hop_length"):
+            return processor          # 本身就是 feature extractor
+    return WhisperFeatureExtractor.from_pretrained(model_id)
 
 
 def setup_tracking(args, total_samples, train_samples, val_samples, total_params):
@@ -857,6 +901,11 @@ def main():
     parser = argparse.ArgumentParser(description="GLM-ASR CTC DDP Training")
     parser.add_argument("--manifests", required=True, help="Comma-separated JSONL manifest paths")
     parser.add_argument("--model-id", default="zai-org/GLM-ASR-Nano-2512")
+    parser.add_argument("--model-family", default="glm-asr", choices=["glm-asr", "qwen3-asr"],
+                        help="编码器家族。两者的输入约定/降采样率/隐藏维度都不同，见 model_families.py")
+    parser.add_argument("--vocab-compact", default=None,
+                        help="紧凑词表 JSON（build_compact_vocab.py 产出）。给了就用它的 "
+                             "blank/unk 和 id 映射，不再用 len(tokenizer)")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--warmup-epochs", type=int, default=1, help="Phase 1: train projections only (blocks frozen)")
     parser.add_argument("--batch-size", type=int, default=8, help="Per-GPU batch size")
@@ -904,7 +953,7 @@ def main():
     parser.add_argument("--no-ddp", action="store_true", help="Force single-GPU mode")
     parser.add_argument("--ddp-no-sync", action=argparse.BooleanOptionalAction, default=True,
                         help="Use DDP.no_sync() during gradient accumulation")
-    parser.add_argument("--ddp-find-unused", action=argparse.BooleanOptionalAction, default=True,
+    parser.add_argument("--ddp-find-unused", action=argparse.BooleanOptionalAction, default=False,
                         help="Enable DDP unused-parameter graph traversal")
     parser.add_argument("--bf16-allreduce", action=argparse.BooleanOptionalAction, default=False,
                         help="Compress DDP gradient all-reduce to bf16 (halves the payload; "
@@ -967,18 +1016,36 @@ def main():
 
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=True)
-    vocab_size = len(tokenizer)
-    blank_id = vocab_size
-    total_classes = vocab_size + 1
+    family = get_family(args.model_family)
+    token_map = unk_id = None
+    if args.vocab_compact:
+        import json as _json
+        vc = _json.loads(Path(args.vocab_compact).read_text(encoding="utf-8"))
+        token_map = {int(k): v for k, v in vc["qwen_to_compact"].items()}
+        blank_id = vc["blank_id"]
+        unk_id = vc["unk_id"]
+        total_classes = vc["compact_vocab_size"]
+        vocab_size = vc["num_kept"]
+        if is_rank0():
+            logger.info(
+                f"紧凑词表 {args.vocab_compact}: 保留 {vocab_size:,} / 原 "
+                f"{vc['source_vocab_size']:,}  blank={blank_id} unk={unk_id} "
+                f"分类头输出={total_classes:,}"
+            )
+    else:
+        vocab_size = len(tokenizer)
+        blank_id = vocab_size
+        total_classes = vocab_size + 1
     if is_rank0():
-        logger.info(f"Tokenizer: {type(tokenizer).__name__}, vocab={vocab_size}, blank_id={blank_id}")
+        logger.info(f"Tokenizer: {type(tokenizer).__name__}, vocab={vocab_size}, "
+                    f"blank_id={blank_id}, family={family.name}")
 
     feature_extractor = create_feature_extractor(args.model_id)
 
     if is_rank0():
         logger.info(f"Loading manifests: {args.manifests}")
     dataset = ManifestDataset(
-        args.manifests, tokenizer,
+        args.manifests, tokenizer, token_map=token_map, unk_id=unk_id,
         target_sr=feature_extractor.sampling_rate,
         max_audio_sec=args.max_audio_sec,
     )
@@ -1038,7 +1105,8 @@ def main():
         if world_size > 1 else None
     )
 
-    collate = lambda b: collate_ctc(b, feature_extractor, blank_id, pad_to_30s=args.pad_to_30s)
+    collate = lambda b: collate_ctc(b, feature_extractor, blank_id,
+                                    pad_to_30s=args.pad_to_30s, family=family)
 
     train_loader = DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=(train_sampler is None),
@@ -1052,7 +1120,7 @@ def main():
     )
 
     ctc_decoder = CTCDecoder(
-        encoder_dim=1280,
+        encoder_dim=family.hidden_size,
         ctc_hidden=args.ctc_hidden,
         proj_hidden=args.ctc_proj,
         num_blocks=args.ctc_blocks,
@@ -1096,6 +1164,7 @@ def main():
         grad_accum=args.grad_accum,
         log_interval=args.log_interval,
         save_dir=args.save_dir,
+        family=family,
         blank_id=blank_id,
         save_interval=args.save_interval,
         keep_last_checkpoints=args.keep_last_checkpoints,
@@ -1111,12 +1180,21 @@ def main():
         nvtx_profile=args.nvtx_profile,
     )
 
-    if world_size > 1:
-        trainer.wrap_ddp(
-            find_unused_parameters=args.ddp_find_unused,
-            bf16_allreduce=args.bf16_allreduce,
-            bucket_cap_mb=args.ddp_bucket_cap_mb or None,
-        )
+    # 必须先冻结再包 DDP：DDP 在构造时快照哪些参数需要梯度。若先包再冻结，
+    # blocks 会被登记为"需要梯度"但每步都拿不到，只能靠 find_unused_parameters=True
+    # 兜底 —— 而那个选项在 8 卡 HCCL 上会死锁（实测 1/2 卡正常，8 卡挂死在首个
+    # 集合通信，AICore 0%、日志冻结）。冻结在前就不需要它了。
+    trainer.set_use_blocks(False)
+
+    def _wrap():
+        if world_size > 1:
+            trainer.wrap_ddp(
+                find_unused_parameters=args.ddp_find_unused,
+                bf16_allreduce=args.bf16_allreduce,
+                bucket_cap_mb=args.ddp_bucket_cap_mb or None,
+            )
+
+    _wrap()
 
     if args.resume:
         trainer.load(args.resume)
@@ -1138,7 +1216,6 @@ def main():
     if is_rank0():
         logger.info(f"Phase 1: Warmup {args.warmup_epochs} epochs (blocks frozen)")
 
-    trainer.set_use_blocks(False)
     for epoch in range(1, args.warmup_epochs + 1):
         if train_sampler:
             train_sampler.set_epoch(epoch)
@@ -1163,6 +1240,9 @@ def main():
             logger.info(f"Phase 2: Full training {args.epochs} epochs (blocks active)")
 
         trainer.set_use_blocks(True)
+        # 解冻后必须重建 DDP：旧的那个是按 Phase 1 的可训练集合建的，
+        # 不重建的话 blocks 的梯度不会参与 all-reduce，各卡会静默发散。
+        _wrap()
         best_loss = float("inf")
 
         for epoch in range(1, args.epochs + 1):
