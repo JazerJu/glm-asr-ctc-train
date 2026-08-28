@@ -306,7 +306,8 @@ def main():
     ap.add_argument("--ctc-ffn", type=int, default=128)
     ap.add_argument("--ctc-proj", type=int, default=2048)
     ap.add_argument("--out", default=None, help="结果 JSON 输出路径")
-    ap.add_argument("--save-hyps", type=int, default=20, help="每个语料存多少条样例")
+    ap.add_argument("--save-hyps", type=int, default=20,
+                    help="每个语料存多少条样例（负数=全部，供逐句分析）")
     ap.add_argument("--tag", default=None, help="报告里的模型名")
     args = ap.parse_args()
 
@@ -370,6 +371,8 @@ def main():
                 records.append({
                     "corpus": name, "lang": lang, "contaminated": cont,
                     "ref": base.inner.text(gi), "hyp": hyp,
+                    "audio_path": base.inner.audio_path(gi),
+                    "duration": round(float(durs[k]), 3),
                 })
             if r0 and bi % 20 == 0:
                 logger.info(f"batch {bi}/{len(loader)}  {len(records)} 条")
@@ -403,8 +406,11 @@ def main():
             d, s, dl, i = edit_distance(ru, hu)
             a = agg[c][metric]
             a[0] += d; a[1] += len(ru); a[2] += s; a[3] += dl; a[4] += i
-        if len(samples[c]) < args.save_hyps:
-            samples[c].append({"ref": r["ref"], "hyp": r["hyp"]})
+        if args.save_hyps < 0 or len(samples[c]) < args.save_hyps:
+            # save_hyps < 0 时全量导出，供逐句分析（按语速分箱等）用
+            samples[c].append({"ref": r["ref"], "hyp": r["hyp"],
+                               "audio_path": r["audio_path"],
+                               "duration": r["duration"]})
 
     tag = args.tag or Path(args.checkpoint).stem
     report = {"model": tag, "checkpoint": args.checkpoint, "family": family.name,
