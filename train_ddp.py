@@ -778,7 +778,10 @@ class CTCTrainer:
             "global_step": self.global_step,
             "blank_id": self.blank_id,
             "config": {
-                "encoder_dim": 1280,
+                # 从实际的 linear1 读，别写死：GLM 是 1280，Qwen3 是 2048。
+                # 写死 1280 会让只按 config 重建模型的人拿到错的结构
+                # （2026-08-27 那轮 Qwen3 的 checkpoint 就带着错的 1280）。
+                "encoder_dim": self.ctc_decoder.linear1.in_features,
                 "ctc_hidden": self.ctc_decoder.linear2.out_features,
                 "proj_hidden": self.ctc_decoder.linear1.out_features,
                 "num_blocks": len(self.ctc_decoder.blocks),
