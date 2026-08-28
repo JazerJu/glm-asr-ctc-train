@@ -191,6 +191,27 @@ NVTX instrumentation via `scripts/profile_train_hotpath.sh`, which has never act
 5.3× will not show up end to end. The box has no NVLink (see Environment) but that is a probably-minor
 factor here — DDP only wraps the ~40M-param decoder, so all-reduce payload is small even over PCIe.
 
+## 两个工作副本 —— 查 git 状态前先看这里
+
+代码有两份，只有一份是仓库：
+
+| 路径 | 角色 |
+|---|---|
+| `~/repos/glm-asr-ctc-trn-dev`（笔记本） | **唯一的 git 权威**。有 origin、有 SSH 密钥，所有提交/推送都在这里做。 |
+| `/remote-home/wy008/glm-ctc`（npu107） | 跑训练和评测的工作副本。有 `.git`，但**停在 2026-08-26 的 01580c3**，没有 remote 凭据，从没 pull 过。 |
+
+工作流是：笔记本改 → `scp` 到 npu107 跑 → `scp` 拉回笔记本 → 在笔记本 commit + push。
+文件是拷进 npu107 的，不是 pull 进去的，所以在 npu107 的 `git status` 里它们**永远是
+未跟踪状态**。
+
+**这会骗人**：在 npu107 上跑 `git log` 会看到一个落后 7 个 commit 的历史，
+看起来像"什么都没提交过"。2026-08-28 我就是这么误判的，还据此在 npu107 上
+建了个孤立提交（已 reset 掉）。**要确认提交状态，只在笔记本那份上查。**
+
+要根治就给 npu107 配上 Gitea 的 deploy key，让它能自己 pull/push，两边合一。
+公钥已生成在 `~/.ssh/id_ed25519.pub`（`npu107-glm-ctc`），等加到仓库设置里。
+
+
 ## 昇腾 910B / Qwen3-ASR（2026-08-27/28）—— 实测，不要重新推导
 
 ### 环境
