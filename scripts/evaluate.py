@@ -299,6 +299,10 @@ def main():
     ap.add_argument("--max-audio-sec", type=float, default=30.0)
     ap.add_argument("--max-samples", type=int, default=0, help="每个 manifest 最多评多少条（0=全部）")
     ap.add_argument("--pad-to-30s", action="store_true")
+    ap.add_argument("--no-blocks", action="store_true",
+                    help="绕过 5 层 transformer block。评 warmup 阶段的 checkpoint "
+                         "必须开：那时 blocks 冻结着没吃过梯度，还是初始化的随机值，"
+                         "走它们等于往特征里灌噪声。")
     ap.add_argument("--strip-punct", action=argparse.BooleanOptionalAction, default=True)
     ap.add_argument("--ctc-hidden", type=int, default=512)
     ap.add_argument("--ctc-blocks", type=int, default=5)
@@ -357,7 +361,7 @@ def main():
             feats, feat_lens, in_lens, idxs, durs = batch
             with torch.amp.autocast(device_type(), dtype=torch.bfloat16):
                 hidden = family.encode(encoder, feats, feat_lens, device)
-                logits = decoder(hidden.float(), use_blocks=True)
+                logits = decoder(hidden.float(), use_blocks=not args.no_blocks)
             in_lens = in_lens.clamp(max=logits.shape[1])
             hyp_ids = greedy_decode(logits, in_lens, blank_id)
             audio_sec += float(durs.sum())

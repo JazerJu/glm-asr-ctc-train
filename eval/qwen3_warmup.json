@@ -1,0 +1,474 @@
+{
+  "model": "qwen3-warmup",
+  "checkpoint": "checkpoints/warmup_epoch1.pt",
+  "family": "qwen3-asr",
+  "global_step": 14229,
+  "num_utts": 11103,
+  "audio_hours": 16.27377170138889,
+  "decode_sec": 10.362035512924194,
+  "rtf": 0.00017687007356683305,
+  "corpora": {
+    "aishell1_test": {
+      "lang": "zh",
+      "contaminated": false,
+      "utts": 7176,
+      "primary_metric": "cer",
+      "metrics": {
+        "cer": {
+          "rate": 0.11408390206652985,
+          "errors": 11952,
+          "units": 104765,
+          "sub": 5560,
+          "del": 4044,
+          "ins": 2348
+        },
+        "wer": {
+          "rate": 0.6911928651059086,
+          "errors": 4960,
+          "units": 7176,
+          "sub": 4857,
+          "del": 0,
+          "ins": 103
+        },
+        "mer": {
+          "rate": 0.1140170858588269,
+          "errors": 11945,
+          "units": 104765,
+          "sub": 5559,
+          "del": 4045,
+          "ins": 2341
+        }
+      },
+      "samples": [
+        {
+          "ref": "标杆房企必然调整市场战略",
+          "hyp": "标感房企必然调整市场战略",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0125.wav",
+          "duration": 4.311
+        },
+        {
+          "ref": "目前挂牌的只有几宗土地",
+          "hyp": "目前挂牌的只有几嵩土地",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0133.wav",
+          "duration": 3.557
+        },
+        {
+          "ref": "零三年到去年",
+          "hyp": "零三年到去年",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0141.wav",
+          "duration": 2.5
+        },
+        {
+          "ref": "一线城市签约十七万套",
+          "hyp": "一线城市签约十七万套",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0149.wav",
+          "duration": 3.344
+        },
+        {
+          "ref": "很难出现去年那样的楼市暴涨",
+          "hyp": "很难出现去年那样的楼市暴涨",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0157.wav",
+          "duration": 3.952
+        },
+        {
+          "ref": "楼市调控的行政手段宜减不宜加",
+          "hyp": "楼市调控的行政手段易减不易一家",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0165.wav",
+          "duration": 4.311
+        },
+        {
+          "ref": "类似的补贴政策常常是短效刺激",
+          "hyp": "类似的补贴政策常常是短笑刺激",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0173.wav",
+          "duration": 4.747
+        },
+        {
+          "ref": "在经济增速放缓阶段运用货币政策工具时",
+          "hyp": "在速放缓阶段运用货币政策工具时",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0181.wav",
+          "duration": 6.0
+        },
+        {
+          "ref": "采取了一系列的政策措施",
+          "hyp": "采取了一系列的措施",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0190.wav",
+          "duration": 3.705
+        },
+        {
+          "ref": "新批复了七只创投基金的设立方案",
+          "hyp": "先批复了七只创创投的设立方案",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0198.wav",
+          "duration": 5.693
+        },
+        {
+          "ref": "相关公司股票走势农产品",
+          "hyp": "相关公司股票式农产品",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0206.wav",
+          "duration": 3.809
+        },
+        {
+          "ref": "要继续开展商贸零售领域价格秩序整治",
+          "hyp": "要继续开展商贸零售领域价格秩序整治",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0214.wav",
+          "duration": 5.361
+        },
+        {
+          "ref": "加强建设资金统筹和组织实施工作",
+          "hyp": "加强建设资金统筹和实施工作",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0222.wav",
+          "duration": 5.407
+        },
+        {
+          "ref": "各地保障房建设的套数",
+          "hyp": "各地保障房建设的套数",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0230.wav",
+          "duration": 3.266
+        },
+        {
+          "ref": "形成一批具有国际竞争力的中国企业",
+          "hyp": "形成一批具有国际竞争力的型企业",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0238.wav",
+          "duration": 4.626
+        },
+        {
+          "ref": "鼓励商业银行去境外开设分支机构",
+          "hyp": "鼓励银行去境外开设分支机构",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0247.wav",
+          "duration": 4.736
+        },
+        {
+          "ref": "不能波及和影响其他无关国家甚至本国",
+          "hyp": "不能及和影响其他无关国家甚至本国",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0255.wav",
+          "duration": 5.343
+        },
+        {
+          "ref": "是威力巨大的定时炸弹",
+          "hyp": "是威力巨大的定时炸弹",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0263.wav",
+          "duration": 3.5
+        },
+        {
+          "ref": "美国芯片行业兴起并购热潮搜狐科技",
+          "hyp": "美国芯片金融业兴起并购热潮搜狐科技",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0271.wav",
+          "duration": 5.283
+        },
+        {
+          "ref": "应用于汽车医疗等行业",
+          "hyp": "用于汽车医疗等行业",
+          "audio_path": "/remote-home/wy008/data/data_aishell/wav/test/S0764/BAC009S0764W0279.wav",
+          "duration": 3.299
+        }
+      ]
+    },
+    "ascend_test": {
+      "lang": "zh-en",
+      "contaminated": false,
+      "utts": 1315,
+      "primary_metric": "mer",
+      "metrics": {
+        "cer": {
+          "rate": 0.21417144036744595,
+          "errors": 4150,
+          "units": 19377,
+          "sub": 1099,
+          "del": 2533,
+          "ins": 518
+        },
+        "wer": {
+          "rate": 0.6004953998584572,
+          "errors": 1697,
+          "units": 2826,
+          "sub": 979,
+          "del": 275,
+          "ins": 443
+        },
+        "mer": {
+          "rate": 0.18959876011710006,
+          "errors": 2202,
+          "units": 11614,
+          "sub": 931,
+          "del": 981,
+          "ins": 290
+        }
+      },
+      "samples": [
+        {
+          "ref": "呃what's the呃",
+          "hyp": " it was the",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/522/00004.flac",
+          "duration": 1.36
+        },
+        {
+          "ref": "yeah m s c oh yeah i know [unk] yeah",
+          "hyp": "yeah s c oh yeah i a master yeah",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/922/00012.flac",
+          "duration": 3.44
+        },
+        {
+          "ref": "深圳",
+          "hyp": "深圳",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/531/00020.flac",
+          "duration": 0.56
+        },
+        {
+          "ref": "ok福建",
+          "hyp": " k健",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/820/00028.flac",
+          "duration": 1.02
+        },
+        {
+          "ref": "ok",
+          "hyp": "okay",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/094/00036.flac",
+          "duration": 0.46
+        },
+        {
+          "ref": "invested consulting",
+          "hyp": "related to supporting",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/583/00044.flac",
+          "duration": 1.21
+        },
+        {
+          "ref": "you need to learn how to communicate with us and givesome technical solutions",
+          "hyp": "you will need to learn how to communicate with others and give some clinical solutions",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/320/00052.flac",
+          "duration": 6.28
+        },
+        {
+          "ref": "嗯",
+          "hyp": "嗯",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/763/00060.flac",
+          "duration": 0.39
+        },
+        {
+          "ref": "computer languages是",
+          "hyp": " computer language",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/737/00068.flac",
+          "duration": 1.45
+        },
+        {
+          "ref": "uh",
+          "hyp": "呃",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/833/00076.flac",
+          "duration": 0.68
+        },
+        {
+          "ref": "yeah",
+          "hyp": "yeah",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/700/00084.flac",
+          "duration": 0.58
+        },
+        {
+          "ref": "也还有很多不适应的地方",
+          "hyp": "也还有很多不顺的地方",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/548/00092.flac",
+          "duration": 1.82
+        },
+        {
+          "ref": "嗯",
+          "hyp": "嗯",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/372/00100.flac",
+          "duration": 0.55
+        },
+        {
+          "ref": "uh uh i i mean what's your planning for your next",
+          "hyp": "呃呃i i mean what's your planning for your next",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/033/00108.flac",
+          "duration": 3.66
+        },
+        {
+          "ref": "so you prefer work in hongkong or in shenzhen",
+          "hyp": "so you prefer work inongong inenzhen",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/900/00116.flac",
+          "duration": 3.37
+        },
+        {
+          "ref": "uh",
+          "hyp": "",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/863/00124.flac",
+          "duration": 1.22
+        },
+        {
+          "ref": "大多数night就是一直在床上睡觉",
+          "hyp": "大多数那一周在床上睡觉",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/849/00132.flac",
+          "duration": 2.77
+        },
+        {
+          "ref": "哦对对对",
+          "hyp": "哦对对",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/548/00140.flac",
+          "duration": 0.95
+        },
+        {
+          "ref": "嗯",
+          "hyp": "嗯",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/635/00148.flac",
+          "duration": 0.3
+        },
+        {
+          "ref": "呃i live in [unk]",
+          "hyp": "fil i live in hang",
+          "audio_path": "/remote-home/wy008/data/ascend/extracted/test/570/00156.flac",
+          "duration": 2.0
+        }
+      ]
+    },
+    "librispeech_test_clean": {
+      "lang": "en",
+      "contaminated": false,
+      "utts": 2612,
+      "primary_metric": "wer",
+      "metrics": {
+        "cer": {
+          "rate": 0.058376179643290775,
+          "errors": 13318,
+          "units": 228141,
+          "sub": 2493,
+          "del": 6608,
+          "ins": 4217
+        },
+        "wer": {
+          "rate": 0.11288355250619402,
+          "errors": 5923,
+          "units": 52470,
+          "sub": 3809,
+          "del": 1102,
+          "ins": 1012
+        },
+        "mer": {
+          "rate": 0.11290261101581857,
+          "errors": 5924,
+          "units": 52470,
+          "sub": 3809,
+          "del": 1101,
+          "ins": 1014
+        }
+      },
+      "samples": [
+        {
+          "ref": "he hoped there would be stew for dinner turnips and carrots and bruised potatoes and fat mutton pieces to be ladled out in thick peppered flour fattened sauce",
+          "hyp": "he hoped there would be stew for dinner turnips and carrots and bruised potatoes and fat mutton pieces to be l ladled out in thick pe pepper flower f fattened sauce",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/1089/134686/1089-134686-0000.flac",
+          "duration": 10.435
+        },
+        {
+          "ref": "the chaos in which his ardour extinguished itself was a cold indifferent knowledge of himself",
+          "hyp": "the chaos in which his ardour extingu distinguished himself was a cold indifferent knowledge of himself",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/1089/134686/1089-134686-0008.flac",
+          "duration": 6.73
+        },
+        {
+          "ref": "then you can ask him questions on the catechism dedalus",
+          "hyp": "then you can ask him questions on the cateismalus",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/1089/134686/1089-134686-0016.flac",
+          "duration": 3.54
+        },
+        {
+          "ref": "if the wine change into vinegar and the host crumble into corruption after they have been consecrated is jesus christ still present under their species as god and as man",
+          "hyp": "if the wine change into vinegar and the host crumble into corruption after they have been consecrated is jesus christ still present under their species as god and as man",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/1089/134686/1089-134686-0024.flac",
+          "duration": 11.655
+        },
+        {
+          "ref": "he is called as you know the apostle of the indies",
+          "hyp": "he is called as you know the apostel of the indes",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/1089/134686/1089-134686-0032.flac",
+          "duration": 4.09
+        },
+        {
+          "ref": "he set off abruptly for the bull walking rapidly lest his father's shrill whistle might call him back and in a few moments he had rounded the curve at the police barrack and was safe",
+          "hyp": "he set offly for the bull walking lest his father shrill whistle might call him back and in a few moments he had rounded the curve at the police bar barracks and was safe",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/1089/134691/1089-134691-0002.flac",
+          "duration": 11.6
+        },
+        {
+          "ref": "brother mac ardle brother keogh",
+          "hyp": " brother mcle brother koff",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/1089/134691/1089-134691-0010.flac",
+          "duration": 3.195
+        },
+        {
+          "ref": "again again",
+          "hyp": "againagain",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/1089/134691/1089-134691-0018.flac",
+          "duration": 3.09
+        },
+        {
+          "ref": "you will find me continually speaking of four men titian holbein turner and tintoret in almost the same terms",
+          "hyp": " you will find me continually speaking of four men t titian h holine turnerner and tin in almost the same terms",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/1188/133604/1188-133604-0000.flac",
+          "duration": 10.725
+        },
+        {
+          "ref": "for believe me the final philosophy of art can only ratify their opinion that the beauty of a cock robin is to be red and of a grass plot to be green and the best skill of art is in instantly seizing on the manifold deliciousness of light which you can only seize by precision of instantaneous touch",
+          "hyp": " for believe me the final philosophy of art can only ratify their opinion that the beauty of a cock robin is to be read red and of a grass plot to be green and the best skill of art is in an instantly seizing on the manifold deliciousness of light which you can only seize by precision ofaneous touch",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/1188/133604/1188-133604-0008.flac",
+          "duration": 20.755
+        },
+        {
+          "ref": "this at once compels you to understand that the work is to be imaginative and decorative that it represents beautiful things in the clearest way but not under existing conditions and that in fact you are producing jeweler's work rather than pictures",
+          "hyp": "this at onceels you to understand that the work is to be imagin imaginative and decorative that it represents beautiful things in the clearist way but not under existing conditions and that in fact you are producing jewers's work rather than pictures",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/1188/133604/1188-133604-0016.flac",
+          "duration": 16.595
+        },
+        {
+          "ref": "nothing will be more precious to you i think in the practical study of art than the conviction which will force itself on you more and more every hour of the way all things are bound together little and great in spirit and in matter",
+          "hyp": " nothing will be more precious to you i think in the practical study of art than the conviction which will force itself on you more and more every hour of the way all things are bound together little and great in spirit and in matter",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/1188/133604/1188-133604-0024.flac",
+          "duration": 15.24
+        },
+        {
+          "ref": "it is only a pencil outline by edward burne jones in illustration of the story of psyche it is the introduction of psyche after all her troubles into heaven",
+          "hyp": "it is only aencil outlined by edwardrneones in illustration of the story of psyche it is the introduction of psyche after all her troubles into heaven",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/1188/133604/1188-133604-0032.flac",
+          "duration": 10.985
+        },
+        {
+          "ref": "the crampness and the poverty are all intended",
+          "hyp": " the crampness in the poverty are all intended",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/1188/133604/1188-133604-0040.flac",
+          "duration": 3.23
+        },
+        {
+          "ref": "hay fever a heart trouble caused by falling in love with a grass widow",
+          "hyp": " hey fever a heart tre trouble cause caused by fall falling in love with a grass widow",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/121/121726/121-121726-0003.flac",
+          "duration": 6.755
+        },
+        {
+          "ref": "husband the next thing to a wife",
+          "hyp": " husband the next thing to a wife",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/121/121726/121-121726-0011.flac",
+          "duration": 4.035
+        },
+        {
+          "ref": "my heart doth plead that thou in him dost lie a closet never pierc'd with crystal eyes but the defendant doth that plea deny and says in him thy fair appearance lies",
+          "hyp": "my heart doth plead that thou in him dost lie a closet never pierced with crystal eyes but the defendant do that plea deny and says in him thy fair appearance lies",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/121/123852/121-123852-0004.flac",
+          "duration": 16.29
+        },
+        {
+          "ref": "cried one of the women he took no notice of her he looked at me but as if instead of me he saw what he spoke of",
+          "hyp": " cried one of the women he took no notice of her he looked at me but as if instead of me he saw what he spoke of",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/121/127105/121-127105-0002.flac",
+          "duration": 7.495
+        },
+        {
+          "ref": "she sent me the pages in question before she died",
+          "hyp": "she sent me the pages in question before she died",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/121/127105/121-127105-0010.flac",
+          "duration": 2.85
+        },
+        {
+          "ref": "cried the ladies whose departure had been fixed",
+          "hyp": "cri cried the ladies whose departure had been fixed",
+          "audio_path": "/remote-home/wy008/data/librispeech/LibriSpeech/test-clean/121/127105/121-127105-0018.flac",
+          "duration": 2.77
+        }
+      ]
+    }
+  }
+}
