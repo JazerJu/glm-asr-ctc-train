@@ -191,135 +191,90 @@ NVTX instrumentation via `scripts/profile_train_hotpath.sh`, which has never act
 5.3× will not show up end to end. The box has no NVLink (see Environment) but that is a probably-minor
 factor here — DDP only wraps the ~40M-param decoder, so all-reduce payload is small even over PCIe.
 
-## Ascend 910B / Qwen3-ASR (2026-08-27) — measured, do not re-derive
+## 昇腾 910B / Qwen3-ASR（2026-08-27/28）—— 实测，不要重新推导
 
-One codebase serves both platforms. `device_type()` in train_ddp.py probes
-cuda/npu/cpu at runtime and `dist_backend()` maps it to nccl/hccl — there is no
-device flag. The CUDA path is byte-for-byte unchanged. Launch with
-`scripts/run_ddp_ascend.sh` (it bakes in the env below); `scripts/run_ddp.sh`
-stays the CUDA launcher.
+### 环境
+- npu107 容器：8× 910B3（65.5 GB/卡），CANN 9.0.1，torch 2.8 + torch_npu 2.8.0.post5，aarch64。
+- 一切环境（conda / CANN set_env / libgomp preload / HCCL）集中在 `scripts/_ascend_env.sh`，
+  训练与评测两个 launcher 都 source 它。**不要在别处重复这段**。
+- `set -u` 会同时打断 conda 的 init 和 CANN 的 `set_env.sh`，两处都必须临时 `set +u`。
+- aarch64 上必须同时 preload conda 与 sklearn 两份 `libgomp`，少一个报
+  "cannot allocate memory in static TLS block"。
+- 昇腾上：`--fused-adamw` 可用；`--compile-decoder` 不可用（无 triton）；
+  `--nvtx-profile` 静默失效；`NCCL_P2P_LEVEL` 无意义（HCCS 全互联）。
+- `--num-workers 8` 单卡会挂死（CANN 上下文 × fork），4 是实测安全值。
+- transformers 钉在 4.57.6（qwen-asr 依赖）。GLM-ASR 的 `model_type=glmasr` 要 ≥5.x，
+  所以 5.16.1 用 `pip install --target /remote-home/wy008/tf55 --no-deps` 装在旁边，
+  只在评测 GLM 时挂 `EXTRA_PYTHONPATH`，不动训练环境。
 
-### Flags that do NOT carry over to Ascend
+### Qwen3-ASR 编码器的三个坑（都在 model_families.py 里处理了）
+1. 输入是**时间维拼接的 2D** `[128, ΣT_mel]` + `feature_lens`，不是 `[B,128,T]`。
+2. 帧率 **13 fps（76.9 ms/帧）**，不是 Whisper/GLM 的 50 fps。官方长度公式
+   `... + (mel_len // 100) * 13`，`qwen3_output_lengths()` 复刻了它，9/9 前向精确吻合。
+3. qwen-asr 0.0.6 的 `_prepare_attention_mask` 定义了但从没被调用，`cu_seq_lens`
+   只有 flash_attention_2 后端认。不打 `patch_qwen3_attention_mask()` 的话，
+   同一条音频单条推理 vs 批推理余弦只有 0.81–0.88；打完 0.9998+。**CUDA 上同样中招。**
 
-| flag | on Ascend |
-|---|---|
-| `--compile-decoder` | **unusable** — inductor needs triton, absent in the CANN env |
-| `--nvtx-profile` | silently skipped (`device_type() != "cuda"` returns early) |
-| `NCCL_P2P_LEVEL=SYS` | meaningless. It bought +69% on the A100 box because those GPUs straddled two NUMA nodes with no NVLink; 910B uses HCCS full mesh |
-| `--bf16-allreduce` | symbol exists, never verified under HCCL, left off |
-| `--fused-adamw` | **works** (tested) |
-
-### Environment that is not code
-
-```bash
-source /usr/local/Ascend/ascend-toolkit/set_env.sh   # 无它 torch_npu 缺 libhccl.so
-export LD_PRELOAD=<env>/lib/libgomp.so.1:<env>/lib/python3.12/site-packages/scikit_learn.libs/libgomp-*.so.1.0.0
-```
-
-Both libgomp copies must be preloaded — sklearn (pulled in by transformers)
-ships one, torchaudio uses conda's. dlopen'd libs get no static TLS on aarch64,
-so missing either gives `cannot allocate memory in static TLS block`. Also note
-CANN's `set_env.sh` and conda's init are not `set -u` clean; the launcher wraps
-both in `set +u`.
-
-### Qwen3-ASR encoder differs from GLM/Whisper in ways that break silent assumptions
-
-|  | GLM-ASR-Nano | Qwen3-ASR-1.7B |
+### 两轮训练的可比对照（同一批数据、同一套超参，只有编码器和 batch 不同）
+| | GLM-ASR-Nano (charmed-smoke-8) | Qwen3-ASR-1.7B (expert-dawn-2) |
 |---|---|---|
-| load | `AutoModel` | `qwen_asr.Qwen3ASRModel` (AutoModel cannot) |
-| encoder input | `[B,128,T]` | `[128,ΣT]` time-concatenated + `feature_lens` |
-| encoder output | `[B,T',D]` | `[ΣT',D]` flat, must split by out_lens |
-| downsample | conv1d ×1 stride 2 | **conv2d ×3 stride 2 → 8×** |
-| frame rate | 50 fps (20 ms) | **13 fps (77 ms)** |
-| hidden | 1280 | 2048 |
-| attention | global | **windowed, `n_window_infer=800` → 8 s blocks** |
+| 硬件 | 8× A100-40GB | 8× 910B3 |
+| batch × accum × 卡 | 8 × 4 × 8 = 256/步 | 64 × 1 × 8 = 512/步 |
+| optimizer step | 134,140 | 56,916 |
+| 样本遍历数 | ≈34.3 M | ≈29.1 M |
+| max_audio_sec | 20 | 20 |
+| 词表 / 分类头 | 59,264 | 72,468（紧凑） |
+| 帧率 | 50 fps | 13 fps |
+| val loss | 0.5211 | 0.6150（**词表不同，不可直接比**） |
 
-The frame rate is the dangerous one: reusing GLM's `w // (160*2)` overestimates
-Qwen3's usable frames 4×, `input_lengths` gets clamped, and CTC silently trains
-against truncated alignments while the loss still falls. The formula in
-`model_families.qwen3_output_lengths` was checked against 9 real forward passes
-(9/9 exact).
+### 识别率实测（`scripts/evaluate.py`，贪心解码，8 卡 1.1 分钟跑完 91.3 小时音频，RTF 0.0002）
+测试集由 `scripts/build_test_manifests.py` 生成，会自动查训练 manifest 做污染标记。
+干净的（训练集从没见过）：aishell1 dev/test、librispeech test-clean/other、ASCEND test。
+talcs / magicdata 的 test 混进过训练集，只作参考。
 
-`AutoProcessor` returns a `Qwen2TokenizerFast` for Qwen3-ASR (no
-`.feature_extractor`), and its return type is not stable across calls —
-`create_feature_extractor` falls back to `WhisperFeatureExtractor` directly.
+| 语料 | 指标 | GLM | Qwen3 |
+|---|---|---|---|
+| aishell1_test | CER | **4.71%** | 5.31% |
+| aishell1_dev | CER | **4.09%** | 4.37% |
+| librispeech test-clean | WER | **4.88%** | 6.93% |
+| librispeech test-other | WER | **9.99%** | 12.40% |
+| ASCEND test（中英混说） | MER | **11.84%** | 14.53% |
 
-### qwen-asr 0.0.6 attention-mask defect (patched in model_families.py)
+GLM 在五个干净测试集上全面更好。**最大的混淆项是 optimizer step 差 2.36 倍**
+（134,140 vs 56,916）—— 样本遍历数只差 1.18 倍，是 batch 大 4 倍换来的更少权重更新。
+曾猜"13 fps 帧数不够 CTC 对齐"，**实测不成立**：T/(L+相邻重复) 中位余量
+aishell 7.60×、librispeech 4.34×、ASCEND 5.53×，p1 也有 2.3–2.9×，零违反。
 
-`Qwen3ASRAudioEncoder.forward` calls `encoder_layer(hidden_states, cu_seqlens)`
-with `attention_mask` left None, and `cu_seqlens` only reaches the attention as
-`cu_seq_lens_q/k`, which only flash_attention_2 honours. Ascend has no FA2, so
-sdpa/eager sees no mask and attention runs **globally over the whole
-concatenated batch** — every utterance's encoding is contaminated by its
-neighbours. The file already contains `_prepare_attention_mask` (block-diagonal,
-built from cu_seqlens) but nothing ever calls it.
+### CTC 强制对齐（`scripts/ctc_align.py`）
+真值用 `gilkeyio/librispeech-alignments`（MFA 的词/音素级对齐，走 hf-mirror 下）。
+1500 句 / 29,621 词：
 
-Measured, 8 real utterances all 3.67 s, batch vs single-utterance cosine:
-0.81–0.88 before the patch, 0.9998–0.9999 after. This is not Ascend-specific —
-any non-FA2 backend, CUDA included, hits it. A duplicated-utterance test cannot
-detect it (identical neighbours leave softmax unchanged).
-
-### Vocabulary: 151,705 → 72,468
-
-Over all 6,624,656 samples / 15 languages, Qwen3-ASR's vocab is only 47.7%
-touched (72,377 ids); 52.3% never appear, i.e. 79k rows of `ctc_lo` that never
-receive a positive gradient. Only 27.2% appear ≥100 times, 9.3% ≥1000.
-
-Against GLM-ASR's 59,263 the extra 92,442 slots are mostly generic-LLM tail:
-+61,227 latin subwords, +8,439 arabic/thai/devanagari, +9,172 CJK (mostly rare
-single chars and 4-char idioms). Compression gain is negligible on our main
-languages — zh 1.58 vs 1.49 chars/token (+6%), en 3.96 vs 3.67 (+8%), zh-en
-mixed −1% — **except Korean, 1.03 vs 0.74 (+41%)**, because GLM has only 232
-Korean tokens and falls back to bytes. With 628k KsponSpeech samples that rules
-out simply adopting GLM's vocab.
-
-`build_compact_vocab.py` keeps the used ids plus 89 byte primitives, renumbers
-them, and writes `vocab_compact.json` (`qwen_to_compact` / `compact_to_qwen`).
-`ctc_lo` drops 77.7M → 37.1M params. Tokenisation is unchanged (same Qwen3
-tokenizer, one extra id lookup), so pairing with a Qwen3 decoder needs no
-detokenise/retokenise — just the reverse table. Verified lossless on 60k
-samples: zero unk, zero round-trip drift.
-
-GLM and Qwen3 share 83.7% of token *strings* but almost no ids (4 in common,
-max id 272) — any cross-model mapping must go through text, never ids.
-
-### CTC feasibility at 13 fps is a non-issue
-
-Full pass over 6,624,656 samples, exact constraint `T < L + adjacent-repeats`:
-**281 violations = 0.0042%** (loose `T < L` gives 257). Concentrated in cv_ja
-(0.0878%); everything else below 1e-4. Median frames/tokens ratio 4.36.
-This holds only when `feature_lens` carries the real length —
-`WhisperFeatureExtractor` pads to 30 s by default (`n_samples=480000`), which
-`Qwen3Family.build_features` refuses (`pad_to_30s=True` raises).
-
-### Throughput, 8×910B3, Qwen3-ASR CTC head
-
-| batch/card | samples/s (8 cards) | peak HBM/card |
+| | Qwen3 13fps | GLM 50fps |
 |---|---|---|
-| 8 | 675 | 3.4 GiB |
-| 16 | 1031 | — |
-| 32 | 1252 | — |
-| **64** | **1342** | 6.1 GiB |
-| 128 | 1075 (−20%) | 5.8 GiB |
+| 词起始 中位偏置 | +100.0 ms | +105.0 ms |
+| 词结束 中位偏置 | −78.5 ms | −100.0 ms |
+| 起始 去偏置后 中位\|误差\| | 50.8 ms | 40.0 ms |
+| 起始 去偏置后 ≤100 ms | 77.6% | 82.4% |
+| 结束 去偏置后 中位\|误差\| | 60.0 ms | 50.0 ms |
 
-Knee at 64. Memory is never the constraint (9% of 65.5 GiB at batch 128) — the
-ceiling is data supply, so raise `--num-workers` before anything else. But
-`--num-workers 8` on a single card reproduced a hang (CANN context vs fork); 4
-is the tested-safe value, versus 8 on the A100 round.
+结论：**帧率不是时间戳精度的主导误差项**。帧移差 3.85 倍，去偏置后的中位误差只差
+约 10 ms。两个模型都有 +100 ms 的起始延迟、结束偏早，这是 CTC peaky 的固有性质
+（尖峰打在词中间），是可以直接减掉的常数。
 
-At 1342 samples/s, 6.63M samples ≈ 1.37 h/epoch, so 1 warmup + 3 epochs ≈ 5.5 h
-(measured on a 3-corpus mix; the full 20-manifest set has more opus, expect
-slower).
+三个自检：
+- **时间轴保真度**：音频前面接 1.00 s 数字静音，98.6% 的字时间戳整体平移恰好 1.00 s
+  （中位误差 0.0 ms）→ 1/13 秒这个帧移常数是对的。
+- **跨模型交叉验证（英文）**：两模型字级边界中位只差 30.5 ms，89% 在 100 ms 内，
+  与各自对 MFA 的偏置（+100.0 / +105.0）自洽。
+- **中文未解**：aishell 上 Qwen3 比 GLM 系统性晚 303 ms（去偏置后中位差 68 ms）。
+  没有中文的词级真值，无法判断谁更准。要解决得找一份带 MFA/人工对齐的中文语料。
 
-Loss starts near 78, not `ln(V)≈11.2`, because `_init_bias` puts blank at −5.0
-and everything else at +1.0 — CTC needs most frames to emit blank, so the init
-fights it. It fell below `ln(V)` by step 500, which is the signal that the model
-has moved past merely correcting the blank prior.
-
-### Container has no SYS_PTRACE
-
-py-spy and gdb are both refused. `train_ddp.py` registers `faulthandler` on
-SIGUSR1; `kill -USR1 <pid>` is the only way to get a Python stack out of a hang.
+### 曾经踩过的测量坑（别重犯）
+- 用 `librosa.effects.trim(top_db=30)` 裁 aishell 静音**一帧都裁不掉**（噪声底离峰值不到 30 dB）。
+  拿"裁完拼接"当边界真值测出的 ±560 ms 全是首尾静音，不是对齐误差。真值要用 MFA。
+- `chars_to_words` 若按"空白字符"切词会失败：空白本身没有时间戳被过滤掉了，
+  必须按 `chars[k]["i"]` 在原文里的下标是否连续来切。
+- MFA 把词典外的词标成 `<unk>`，比对时只比时间不比词形，否则会整句丢弃。
 
 ## Checkpoint landscape
 

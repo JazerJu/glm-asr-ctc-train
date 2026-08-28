@@ -1,0 +1,810 @@
+{
+  "model": "qwen3-asr",
+  "checkpoint": "checkpoints/best.pt",
+  "family": "qwen3-asr",
+  "global_step": 56916,
+  "num_utts": 67638,
+  "audio_hours": 91.30301215277778,
+  "decode_sec": 67.16180562973022,
+  "rtf": 0.0002043312337620607,
+  "corpora": {
+    "aishell1_dev": {
+      "lang": "zh",
+      "contaminated": false,
+      "utts": 14327,
+      "primary_metric": "cer",
+      "metrics": {
+        "cer": {
+          "rate": 0.04374418683924754,
+          "errors": 8983,
+          "units": 205353,
+          "sub": 6033,
+          "del": 1583,
+          "ins": 1367
+        },
+        "wer": {
+          "rate": 0.36706917009841555,
+          "errors": 5259,
+          "units": 14327,
+          "sub": 5230,
+          "del": 0,
+          "ins": 29
+        },
+        "mer": {
+          "rate": 0.04373931717578998,
+          "errors": 8982,
+          "units": 205353,
+          "sub": 6031,
+          "del": 1585,
+          "ins": 1366
+        }
+      },
+      "samples": [
+        {
+          "ref": "广州市房地产中介协会分析",
+          "hyp": "广州市房地产中介协会分析"
+        },
+        {
+          "ref": "其中越秀区涨幅领先",
+          "hyp": "其中越秀区涨幅领先"
+        },
+        {
+          "ref": "部分高端豪宅的交投持续回暖",
+          "hyp": "部分高端豪宅的交交通持续回暖"
+        },
+        {
+          "ref": "与六月多达百分之五的改善型购房占比相比",
+          "hyp": "与六月多达百分之五的改善型购房占比相比"
+        },
+        {
+          "ref": "六月仍有百分之七单价在三万元的房源",
+          "hyp": "六月仍有百分之七在三万元等房源"
+        },
+        {
+          "ref": "记者五日从广州市国土规划委获悉",
+          "hyp": "记者五日从广州市国土规划北获悉"
+        },
+        {
+          "ref": "再有两宗地块抢闸入市",
+          "hyp": "再有两宗地块抢闸入入市"
+        },
+        {
+          "ref": "地块位于黄阁镇黄阁大道西",
+          "hyp": "地块位于黄格镇黄格大道溪"
+        },
+        {
+          "ref": "两宗地按照价高者得原则确定竞得人",
+          "hyp": "两宗地按照价高者的原则确定净得人"
+        },
+        {
+          "ref": "拥有五年证券从业经历",
+          "hyp": "拥有五年证券从业经历"
+        },
+        {
+          "ref": "账户里面的钱是他自己的工资和朋友的借款",
+          "hyp": "账户里面的钱是他自己的公司和朋友的借款"
+        },
+        {
+          "ref": "基金经理已因此获刑据了解",
+          "hyp": "基金经历已也因此户型据了解"
+        },
+        {
+          "ref": "二零一一年一月一日",
+          "hyp": "二零零一一年一月一日"
+        },
+        {
+          "ref": "为科达机电收购恒力泰提供资产评估服务",
+          "hyp": "为柯达机电收购恒利泰提供资产评估服务"
+        },
+        {
+          "ref": "为祁连山提供清产核资审计服务",
+          "hyp": "为祁连山提供产夫审计服务"
+        },
+        {
+          "ref": "吴建敏累计买卖红太阳股票十四万股",
+          "hyp": "吴建敏累计买卖红太阳股票十分万股"
+        },
+        {
+          "ref": "却违背对上市公司的信赖责任义务",
+          "hyp": "却违背对上市公司的信赖责任义务"
+        },
+        {
+          "ref": "还有消息称苹果将在爱尔兰建厂投产汽车",
+          "hyp": "还有消息称苹果将在爱尔兰进场投产汽车"
+        },
+        {
+          "ref": "然后评估从哪里入手可以实现重大变革",
+          "hyp": "然后评估从哪里入手可以实现重大变革"
+        },
+        {
+          "ref": "而业绩稍有起色的特斯拉仍未实现盈利",
+          "hyp": "而业绩有起色的特夫拉仍未实现盈利"
+        }
+      ]
+    },
+    "aishell1_test": {
+      "lang": "zh",
+      "contaminated": false,
+      "utts": 7176,
+      "primary_metric": "cer",
+      "metrics": {
+        "cer": {
+          "rate": 0.0531379754689066,
+          "errors": 5567,
+          "units": 104765,
+          "sub": 3554,
+          "del": 1145,
+          "ins": 868
+        },
+        "wer": {
+          "rate": 0.42725752508361203,
+          "errors": 3066,
+          "units": 7176,
+          "sub": 3031,
+          "del": 0,
+          "ins": 35
+        },
+        "mer": {
+          "rate": 0.0531379754689066,
+          "errors": 5567,
+          "units": 104765,
+          "sub": 3554,
+          "del": 1145,
+          "ins": 868
+        }
+      },
+      "samples": [
+        {
+          "ref": "但因为聚集了过多公共资源",
+          "hyp": "但因为聚集了过多公共私资源"
+        },
+        {
+          "ref": "开发边界将作为城市发展的刚性约定",
+          "hyp": "开发边界将作为城市发展的刚性约定"
+        },
+        {
+          "ref": "国家统计局的数据显示",
+          "hyp": "国家统计局的数据显示"
+        },
+        {
+          "ref": "三四线城市依然冷清",
+          "hyp": "三四线城市依然冷清"
+        },
+        {
+          "ref": "总体偏松部分地区过剩",
+          "hyp": "总体偏松部分部分地区过剩"
+        },
+        {
+          "ref": "楼市调控将去向何方",
+          "hyp": "楼市调控将去向何方"
+        },
+        {
+          "ref": "政府出台每平方米补贴五百元的托市政策",
+          "hyp": "政府出台每平方米补贴五百元的托市政策"
+        },
+        {
+          "ref": "国务院发展研究中心市场经济研究所副所长邓郁松认为",
+          "hyp": "国务院发展中勋市场经济研究所副所长邓玉松认为"
+        },
+        {
+          "ref": "促进战略性新兴产业健康发展",
+          "hyp": "促进战略性新兴产业健康发展"
+        },
+        {
+          "ref": "明确了发展目标和重点任务",
+          "hyp": "明确了发展目标和重点任务"
+        },
+        {
+          "ref": "发改委双节期间重点关注电商促销行为",
+          "hyp": "发改委双春节期间重点关注电商促销行为"
+        },
+        {
+          "ref": "以及提供服务中的变相涨价或价格欺诈行为",
+          "hyp": "以及提供服务中的变相涨价或价格七煞行为"
+        },
+        {
+          "ref": "二零一二年中央进一步加大了资金支持力度",
+          "hyp": "二零一二年中央进一步加大了私巾支持力度"
+        },
+        {
+          "ref": "七千万套保障房多少钢材",
+          "hyp": "七千万套保障房多少钢材"
+        },
+        {
+          "ref": "并鼓励企业在境外上市",
+          "hyp": "并鼓励企业赛境外上市"
+        },
+        {
+          "ref": "但在鼓励企业走出去方面释出多个信号",
+          "hyp": "但在鼓励企业走出去方面是出多个信号"
+        },
+        {
+          "ref": "可控是病毒武器最基本的要求",
+          "hyp": "可控是病毒武器最基本的要求"
+        },
+        {
+          "ref": "病毒武器的隐蔽性极佳",
+          "hyp": "病毒武器的隐蔽性极加"
+        },
+        {
+          "ref": "预示着未来战争模样将完全改变",
+          "hyp": "预示着未来战争模样将完全改变"
+        },
+        {
+          "ref": "拓朗的主打产品是现场可编程门阵列芯片",
+          "hyp": "拓朗的主打产品是现场可编程门列芯片"
+        }
+      ]
+    },
+    "ascend_test": {
+      "lang": "zh-en",
+      "contaminated": false,
+      "utts": 1315,
+      "primary_metric": "mer",
+      "metrics": {
+        "cer": {
+          "rate": 0.15203591887289053,
+          "errors": 2946,
+          "units": 19377,
+          "sub": 1141,
+          "del": 1294,
+          "ins": 511
+        },
+        "wer": {
+          "rate": 0.45046001415428166,
+          "errors": 1273,
+          "units": 2826,
+          "sub": 909,
+          "del": 165,
+          "ins": 199
+        },
+        "mer": {
+          "rate": 0.14534182882727742,
+          "errors": 1688,
+          "units": 11614,
+          "sub": 976,
+          "del": 419,
+          "ins": 293
+        }
+      },
+      "samples": [
+        {
+          "ref": "what's your major and your hobbies",
+          "hyp": "what's your major and your hobbies"
+        },
+        {
+          "ref": "no bussiness school",
+          "hyp": "嗯no business school"
+        },
+        {
+          "ref": "南方人",
+          "hyp": "南方人"
+        },
+        {
+          "ref": "不是",
+          "hyp": "不是"
+        },
+        {
+          "ref": "吃葡萄不吐葡萄皮",
+          "hyp": "吃葡萄不吐葡萄皮"
+        },
+        {
+          "ref": "ok",
+          "hyp": "okay"
+        },
+        {
+          "ref": "yeah",
+          "hyp": "yeah"
+        },
+        {
+          "ref": "体育课上那种吗",
+          "hyp": "体育课上那种嘛"
+        },
+        {
+          "ref": "哦这么technical",
+          "hyp": "哦这么technical的"
+        },
+        {
+          "ref": "in these years",
+          "hyp": "in this ears"
+        },
+        {
+          "ref": "这门课但是",
+          "hyp": "这门课但是"
+        },
+        {
+          "ref": "然后上学期刚来的时候",
+          "hyp": "然后上学期刚来的时候"
+        },
+        {
+          "ref": "所以就会还是选择回大陆找我就觉得 [unk]",
+          "hyp": "所以就会还是选择回大陆找不过这学期适应多了"
+        },
+        {
+          "ref": "so what uh",
+          "hyp": "so what um"
+        },
+        {
+          "ref": "oh you don't likeguangzhou",
+          "hyp": "哦 you don't likeunk"
+        },
+        {
+          "ref": "oh",
+          "hyp": "oh"
+        },
+        {
+          "ref": "嗯",
+          "hyp": "嗯"
+        },
+        {
+          "ref": "嗯所以你现在还是比较focus在找工作这件事上",
+          "hyp": "嗯所以你现在还是比较focus在找工作这件事"
+        },
+        {
+          "ref": "so unlimited time",
+          "hyp": "so limited time"
+        },
+        {
+          "ref": "六月",
+          "hyp": ""
+        }
+      ]
+    },
+    "librispeech_test_clean": {
+      "lang": "en",
+      "contaminated": false,
+      "utts": 2611,
+      "primary_metric": "wer",
+      "metrics": {
+        "cer": {
+          "rate": 0.02951624928731196,
+          "errors": 6730,
+          "units": 228010,
+          "sub": 1515,
+          "del": 3449,
+          "ins": 1766
+        },
+        "wer": {
+          "rate": 0.06925746539033599,
+          "errors": 3632,
+          "units": 52442,
+          "sub": 2592,
+          "del": 667,
+          "ins": 373
+        },
+        "mer": {
+          "rate": 0.06925746539033599,
+          "errors": 3632,
+          "units": 52442,
+          "sub": 2592,
+          "del": 667,
+          "ins": 373
+        }
+      },
+      "samples": [
+        {
+          "ref": "a cold lucid indifference reigned in his soul",
+          "hyp": "a cold lucid indifferenceainedigned in his soul"
+        },
+        {
+          "ref": "but the dusk deepening in the schoolroom covered over his thoughts the bell rang",
+          "hyp": "but the dusk deepening in the school room covered over his thoughts the bell rang"
+        },
+        {
+          "ref": "why was the sacrament of the eucharist instituted under the two species of bread and wine if jesus christ be present body and blood soul and divinity in the bread alone and in the wine alone",
+          "hyp": "why was the sacrament of the uucharist instituted under the two species of bread and wine if jesus christ be present body and blood soul and divinity in the bread alone and in the wine alone"
+        },
+        {
+          "ref": "stephen's heart began slowly to fold and fade with fear like a withering flower",
+          "hyp": "stehen's heart began slowly to fold and fade with fear like a withering flower"
+        },
+        {
+          "ref": "for a full hour he had paced up and down waiting but he could wait no longer",
+          "hyp": "for a full hour he had paced up and down waiting but he could wait no longer"
+        },
+        {
+          "ref": "angry with himself he tried to hide his face from their eyes by gazing down sideways into the shallow swirling water under the bridge but he still saw a reflection therein of their top heavy silk hats and humble tape like collars and loosely hanging clerical clothes brother hickey",
+          "hyp": "angry with himself he tried to hide his face from their eyes by gazing down sideways into the shallow sw swirling water under the bridge but he still saw a reflection therein of their top heavy silk cats and humble tape like collars and loosly hanging clerical clothes brother hickicky"
+        },
+        {
+          "ref": "the europe they had come from lay out there beyond the irish sea europe of strange tongues and valleyed and woodbegirt and citadelled and of entrenched and marshalled races",
+          "hyp": "the europe they had come from lay out there beyond the irish sea europe of strange tongues andied and would beg girt and citadel and of ent entrenched and marshalled races"
+        },
+        {
+          "ref": "a moment before the ghost of the ancient kingdom of the danes had looked forth through the vesture of the hazewrapped city",
+          "hyp": "a moment before the ghost of the ancient kingdom of the de had looked forth through the vestesture of the hay r city"
+        },
+        {
+          "ref": "the brown ground beneath is left for the most part one touch of black is put for the hollow two delicate lines of dark gray define the outer curve and one little quivering touch of white draws the inner edge of the mandible",
+          "hyp": "the brown ground beneath is left for the most part one touch of black is put for the hollow two delicate lines of dark grey to find the outer curve and one little quivering touch of white draws the inner edge of the mandable"
+        },
+        {
+          "ref": "the law of that school is that everything shall be seen clearly or at least only in such mist or faintness as shall be delightful and i have no doubt that the best introduction to it would be the elementary practice of painting every study on a golden ground",
+          "hyp": "the law of that school is that everything shall be seen clearly or at least only in such mist or faintness as shall be delightful and i have no doubt that the best introduction to it would be the elementary practice of painting every study on a golden ground"
+        },
+        {
+          "ref": "the colorist says first of all as my delicious paroquet was ruby so this nasty viper shall be black and then is the question can i round him off even though he is black and make him slimy and yet springy and close down clotted like a pool of black blood on the earth all the same",
+          "hyp": "the colorist says first of all as my delicious perquet was ruby so this nasty v viper shall be black and then is the question can i round him off even though he is black and make him slimy and yet springing and close down cled like a pool of black blood on the earth all the same"
+        },
+        {
+          "ref": "there's one and there's another the dudley and the flint",
+          "hyp": "there's one and there's another the dley and the flint"
+        },
+        {
+          "ref": "it has no beauty whatsoever no specialty of picturesqueness and all its lines are cramped and poor",
+          "hyp": "it has no beauty whatsoever no specialty of picturesqueness and all its lines are cramped and poor"
+        },
+        {
+          "ref": "angor pain painful to hear",
+          "hyp": "orhpainful to hear"
+        },
+        {
+          "ref": "housecleaning a domestic upheaval that makes it easy for the government to enlist all the soldiers it needs",
+          "hyp": "houseing a domestic upheaval that makes it easy for the government to enlist all the soldiers it needs"
+        },
+        {
+          "ref": "thought kills me that i am not thought to leap large lengths of miles when thou art gone but that so much of earth and water wrought i must attend time's leisure with my moan receiving nought by elements so slow but heavy tears badges of either's woe",
+          "hyp": "thought kills me that i am not thought to leap large lengths of miles when thou art gone but that so much of earth and water rott i must attend times leisure with my moan receiving not by elements so slow but heavy tears badges of either's woe"
+        },
+        {
+          "ref": "someone else told a story not particularly effective which i saw he was not following",
+          "hyp": "somesomeone else told a story not particularly effective which i saw he was not following"
+        },
+        {
+          "ref": "she has been dead these twenty years",
+          "hyp": "she has been dead these twenty years"
+        },
+        {
+          "ref": "it was almost the tone of hope everybody will stay",
+          "hyp": "it was almost the tone of hope every everybody will stay"
+        },
+        {
+          "ref": "the departing ladies who had said they would stay didn't of course thank heaven stay they departed in consequence of arrangements made in a rage of curiosity as they professed produced by the touches with which he had already worked us up",
+          "hyp": "the departing ladies who had said they would stay didn't of course thank heaven stay they departed in consequence of arrangements made in a rage of curiosity as they professed produced by the touches with which he had already worked us up"
+        }
+      ]
+    },
+    "librispeech_test_other": {
+      "lang": "en",
+      "contaminated": false,
+      "utts": 2932,
+      "primary_metric": "wer",
+      "metrics": {
+        "cer": {
+          "rate": 0.06006145231082506,
+          "errors": 13214,
+          "units": 220008,
+          "sub": 4024,
+          "del": 6344,
+          "ins": 2846
+        },
+        "wer": {
+          "rate": 0.12398412758975924,
+          "errors": 6499,
+          "units": 52418,
+          "sub": 4614,
+          "del": 1250,
+          "ins": 635
+        },
+        "mer": {
+          "rate": 0.12398412758975924,
+          "errors": 6499,
+          "units": 52418,
+          "sub": 4614,
+          "del": 1250,
+          "ins": 635
+        }
+      },
+      "samples": [
+        {
+          "ref": "i really liked that account of himself better than anything else he said",
+          "hyp": "i really like that account of himself better than anything else he said"
+        },
+        {
+          "ref": "all his former friends shrunk from the disclosures that had to be made of his dishonest gambling wild hopeless struggles made with other people's money to regain his own moderate portion of wealth",
+          "hyp": "all his former friends shunk from the disclosures that had to be made of his dishonest gambling wild hopeless struggles made with other people's money to regain his own moderate portion of wealth"
+        },
+        {
+          "ref": "not vicious he never said that",
+          "hyp": "not vicious he never said that"
+        },
+        {
+          "ref": "i don't set him up for a hero or anything of that kind",
+          "hyp": "i don't set him up for a hero or anything of that kind"
+        },
+        {
+          "ref": "visiting register offices seeing all manner of unlikely people and very few in the least likely absorbed margaret's time and thoughts for several days",
+          "hyp": "visiting register offices seeing all manner of unlikely people and very few in the least likely absorbed margaret's time and thoughts for several days"
+        },
+        {
+          "ref": "at last she said in a low voice",
+          "hyp": "at last she said in a low voice"
+        },
+        {
+          "ref": "the sharpness in her eye turned to a wistful longing as she met margaret's soft and friendly gaze",
+          "hyp": "the sharpness in her eye turned to a wistful longing as she met margaret soft and friendly gaze"
+        },
+        {
+          "ref": "now i'll not have my wench preached to",
+          "hyp": "nowi'll not have my wench preached too"
+        },
+        {
+          "ref": "don't think hardly on him he's a good man he is",
+          "hyp": "don't think hardly on him he's a good man he is"
+        },
+        {
+          "ref": "i will come to morrow said margaret",
+          "hyp": "i will come to morrow said margaret"
+        },
+        {
+          "ref": "what would you do papa how would you set about it",
+          "hyp": "what would you do papahow would you set about it"
+        },
+        {
+          "ref": "my dear said mister hale alarmed pray don't go off on that idea",
+          "hyp": "my dear said mister hel alarmed pray don't go off on that idea"
+        },
+        {
+          "ref": "in making a post mortem examination the alimentary canal should be removed and preserved for further investigation",
+          "hyp": "in making a postim examination the elementary canal should be removed and preserve for further investigation"
+        },
+        {
+          "ref": "in using the elastic stomach tube some fluid should be introduced into the stomach before attempting to empty it or a portion of the mucous membrane may be sucked into the aperture",
+          "hyp": "in using the elastic stomach tube some fluid should be introduced into the stomach before attempting to empty it or a portion of the mucus membrane may be sucked into the aperture"
+        },
+        {
+          "ref": "two cool the mixture and filter wash the residue with strong alcohol and mix the filtrates",
+          "hyp": " two cool the mixture and filterwash the residue with strongunk alcohol and mixed the fil trades"
+        },
+        {
+          "ref": "the residue of the material after digestion with hydrochloric acid and potassium chlorate may have to be examined for silver lead and barium",
+          "hyp": "the residue of the material after digestion with hydroic acid and potassiumade may have to be examined for silver lead and bar buryrium"
+        },
+        {
+          "ref": "what's up matey lost your way dickie explained",
+          "hyp": "what's up matey lost your way dy explained"
+        },
+        {
+          "ref": "she was waitin for the wood to boil the kettle when i come out mother",
+          "hyp": "she wasin for the wood to buy the cattle when to come out mother"
+        },
+        {
+          "ref": "the man's manner was so kind and hearty the whole adventure was so wonderful and new is it country where you going",
+          "hyp": "the man's manner was so kind and he hearty the whole adventure was so wonderful and new is it country where you going"
+        },
+        {
+          "ref": "they could put a man away for less than that",
+          "hyp": "they could put a man away for less than that"
+        }
+      ]
+    },
+    "magicdata_test": {
+      "lang": "zh",
+      "contaminated": true,
+      "utts": 24278,
+      "primary_metric": "cer",
+      "metrics": {
+        "cer": {
+          "rate": 0.041225419167874144,
+          "errors": 9958,
+          "units": 241550,
+          "sub": 5034,
+          "del": 3693,
+          "ins": 1231
+        },
+        "wer": {
+          "rate": 0.248617267485192,
+          "errors": 6338,
+          "units": 25493,
+          "sub": 5128,
+          "del": 1205,
+          "ins": 5
+        },
+        "mer": {
+          "rate": 0.03459864240564386,
+          "errors": 8298,
+          "units": 239836,
+          "sub": 5022,
+          "del": 2051,
+          "ins": 1225
+        }
+      },
+      "samples": [
+        {
+          "ref": "口口音乐",
+          "hyp": "口口音乐"
+        },
+        {
+          "ref": "别说个大概齐说具体是哪首歌",
+          "hyp": "别说个大概齐说具体是哪首歌"
+        },
+        {
+          "ref": "播放刘明湘的歌曲",
+          "hyp": "播放刘明湘的歌曲"
+        },
+        {
+          "ref": "感人肺腑的催人泪下的",
+          "hyp": "感人腑的村人泪下的"
+        },
+        {
+          "ref": "查询附近商店",
+          "hyp": "查询附近商店"
+        },
+        {
+          "ref": "附近的高速怎么走",
+          "hyp": "附近的高速怎么走"
+        },
+        {
+          "ref": "张先生的号码",
+          "hyp": "张先生的号码"
+        },
+        {
+          "ref": "往上点儿",
+          "hyp": "往上点儿"
+        },
+        {
+          "ref": "那人是否死了",
+          "hyp": "那人是否死了"
+        },
+        {
+          "ref": "小一点儿",
+          "hyp": "小一点儿"
+        },
+        {
+          "ref": "播放流行音乐",
+          "hyp": "播放流行音乐"
+        },
+        {
+          "ref": "播放高岗的歌曲",
+          "hyp": "播放高岗的歌曲"
+        },
+        {
+          "ref": "放一下想念妈妈",
+          "hyp": "放一下想念妈妈"
+        },
+        {
+          "ref": "叫他明天下午去机场",
+          "hyp": "叫他明天下午去机场"
+        },
+        {
+          "ref": "报一下上海的天气情况谢谢",
+          "hyp": "报一下上海的天气情况谢谢"
+        },
+        {
+          "ref": "这是老鹰乐队的一首经典歌曲",
+          "hyp": "这是老乐队的一首经典歌曲"
+        },
+        {
+          "ref": "丁子俊是谁演神话里谁",
+          "hyp": "丁子俊是谁演神话里谁"
+        },
+        {
+          "ref": "好听好听那里我知道一句大声呼喊你的名字",
+          "hyp": "好听好听那里我知道一句大声呼喊你的名字"
+        },
+        {
+          "ref": "飞轮海的哪首歌最好听啊",
+          "hyp": "飞轮海的哪首歌最好听呀"
+        },
+        {
+          "ref": "陕西省千阳县的天气",
+          "hyp": "陕西省千阳县的天气"
+        }
+      ]
+    },
+    "talcs_test": {
+      "lang": "zh-en",
+      "contaminated": true,
+      "utts": 14999,
+      "primary_metric": "mer",
+      "metrics": {
+        "cer": {
+          "rate": 0.08271109127869503,
+          "errors": 33364,
+          "units": 403380,
+          "sub": 13746,
+          "del": 11568,
+          "ins": 8050
+        },
+        "wer": {
+          "rate": 0.3937594472036277,
+          "errors": 18235,
+          "units": 46310,
+          "sub": 14069,
+          "del": 2410,
+          "ins": 1756
+        },
+        "mer": {
+          "rate": 0.08464891734720975,
+          "errors": 28370,
+          "units": 335149,
+          "sub": 13512,
+          "del": 8417,
+          "ins": 6441
+        }
+      },
+      "samples": [
+        {
+          "ref": "然后 a large deal of a great deal of.",
+          "hyp": "然后 a large deal of a great deal of"
+        },
+        {
+          "ref": "好那我就随便考你一个了啊",
+          "hyp": "嗯好那我就随便考你一个了啊"
+        },
+        {
+          "ref": "就是首先这篇儿文章的时态是什么",
+          "hyp": "就是首先这篇文章的时态是什么"
+        },
+        {
+          "ref": "嗯就是 major courses.",
+          "hyp": "嗯就是 major courses"
+        },
+        {
+          "ref": "我知道我知道那你你说路线我看你刚才写就是我看过你写的",
+          "hyp": "我知道我知道那你你说路线我我看你刚才写就是我看过你写的"
+        },
+        {
+          "ref": "对你看我们这个地方其实又举了一个例子对吧举了一个例子",
+          "hyp": "对对你看我们这个地方只是又举了一个例子对吧举了一个例子"
+        },
+        {
+          "ref": "这句话能看懂吧这个是高中的一个语法现象高中的语法现象",
+          "hyp": "这句话能看懂吧这个是高中的一个语法现象高中的语法现象"
+        },
+        {
+          "ref": "这个我们是不可以回去再找一下知道在什么位置再回去找一下",
+          "hyp": "这个我们不不可以回去再找一下知道在什么位置再回去找一下"
+        },
+        {
+          "ref": "这个没问题吧好那我们再看",
+          "hyp": "这个没问题吧好那我们再看"
+        },
+        {
+          "ref": "都是有钱人呀！",
+          "hyp": "都是有钱人呀"
+        },
+        {
+          "ref": "然后包括好多特殊变化也是",
+          "hyp": "然后包括好多特殊变化也是"
+        },
+        {
+          "ref": "有些呢！呃你就得变一变需要",
+          "hyp": "有些呢啊你就得变一变需要"
+        },
+        {
+          "ref": "能用于什么情况用打电话你去哪了",
+          "hyp": "能用于什么情况因为打电话你去哪儿了"
+        },
+        {
+          "ref": "他都去那个地方了gone 了走了b 的话表示存在的状态嘛been in 或者是 been to",
+          "hyp": "它都去那个地方啦 gone了啦be 的话表示存在的状态嘛been been in 或者是什么 beenbeen to"
+        },
+        {
+          "ref": "这十个词你备注啊呃那边那另外那十个词实际上处于一个什么样记忆状态呢就是你现在这个 borrow 它的延续性动词keep 和 have 到底是哪个的一个区别你脑子里面是比较模糊比较混沌的一个状态",
+          "hyp": "这十个词你了呃那个那另外那十个词实际上处于一个什么样的记忆状态呢就是你现在这个 borrow 它的延续性动词啊 keep 和 have 到底是哪个的一个区别就是你脑子里面是比较模糊比较馄混沌的一个状态"
+        },
+        {
+          "ref": "这两年了重新造句",
+          "hyp": "这儿这两年了重新造句"
+        },
+        {
+          "ref": "留下了一个最后的一一动作嗯the boy opened his eyes for a moment look at looked at.",
+          "hyp": "留下了一个最后的一一动作嗯the boy opened his eyes for the moment look at looked at"
+        },
+        {
+          "ref": "就直接在上面这样画对号就好一分钟哦",
+          "hyp": "就直接在边这样花对号就好一分钟哦"
+        },
+        {
+          "ref": "它有哪两个意思?",
+          "hyp": "它有哪两个意思"
+        },
+        {
+          "ref": "所以那你就是要记住嗯记住四十",
+          "hyp": "所以那你就是要记住嗯记住四十"
+        }
+      ]
+    }
+  }
+}

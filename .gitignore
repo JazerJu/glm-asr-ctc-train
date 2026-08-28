@@ -44,3 +44,9 @@ __pycache__/
 *.bak[0-9]
 *.tmp
 _pre_merge_backup_*/
+
+# ── 评测产物
+# 测试 manifest 可由 scripts/build_test_manifests.py 重新生成（含绝对路径，14MB）
+manifests_test/
+# 逐字对齐 dump 太大（单文件 6MB），报告 JSON 照常提交
+eval/align_*.json

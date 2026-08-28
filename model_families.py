@@ -98,6 +98,8 @@ class GlmFamily:
     name = "glm-asr"
     hidden_size = 1280
     encoder_subsample = 2      # conv1d x1 stride 2 -> 50 fps
+    # 一个 encoder 帧覆盖的时长。mel hop 160 @16k = 10ms/帧，再降采样 2 倍。
+    frame_shift_sec = HOP_LENGTH / 16000 * 2      # 0.020 s
 
     @staticmethod
     def load_encoder(model_id: str, dtype, device):
@@ -129,6 +131,9 @@ class GlmFamily:
 class Qwen3Family:
     name = "qwen3-asr"
     hidden_size = 2048
+    # conv2d k=3 s=2 三层 -> 8 倍降采样，但官方长度公式是"每 100 个 mel 帧出
+    # 13 帧"（qwen3_output_lengths），所以有效帧移是 1/13 秒而不是 8*10ms。
+    frame_shift_sec = 1.0 / 13.0                  # 0.0769 s
 
     @staticmethod
     def load_encoder(model_id: str, dtype, device):

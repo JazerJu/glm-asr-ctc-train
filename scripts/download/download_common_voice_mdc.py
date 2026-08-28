@@ -37,11 +37,23 @@ def read_key(path: Path | None) -> str:
     raise SystemExit("MDC_API_KEY is not set and key file was not found.")
 
 
+# Cloudflare 按 UA 指纹拦截：urllib 的默认 "Python-urllib/3.x" 会吃到
+# Error 1010 (HTTP 403)，和 API key 是否有效无关。必须伪装成浏览器。
+BROWSER_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+)
+
+
 def api_json(method: str, dataset_id: str, key: str) -> dict:
     req = urllib.request.Request(
         f"{API_BASE}/{dataset_id}{'/download' if method == 'POST' else ''}",
         method=method,
-        headers={"Authorization": f"Bearer {key}"},
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Accept": "application/json",
+            "User-Agent": BROWSER_UA,
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=60) as response:
@@ -70,6 +82,8 @@ def run_aria2(url: str, archive: Path) -> None:
                 "--retry-wait=15",
                 "--max-tries=0",
                 "--auto-file-renaming=false",
+                # 下载链接同样过 Cloudflare，aria2c 的默认 UA 也会被 1010 拦
+                f"--user-agent={BROWSER_UA}",
                 "--dir",
                 str(archive.parent),
                 "--input-file",
