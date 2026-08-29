@@ -785,6 +785,12 @@ class CTCTrainer:
                 "ctc_hidden": self.ctc_decoder.linear2.out_features,
                 "proj_hidden": self.ctc_decoder.linear1.out_features,
                 "num_blocks": len(self.ctc_decoder.blocks),
+                # ffn_hidden / num_heads 以前没存，改了这两个超参的 checkpoint
+                # 在评测时会按默认值重建、形状对不上（和 encoder_dim 同类问题）
+                "ffn_hidden": (self.ctc_decoder.blocks[0].ffn_w1.out_features
+                               if len(self.ctc_decoder.blocks) else None),
+                "num_heads": (self.ctc_decoder.blocks[0].num_heads
+                              if len(self.ctc_decoder.blocks) else None),
                 "vocab_size": self.ctc_decoder.ctc_lo.out_features,
                 "blank_id": self.blank_id,
             },
