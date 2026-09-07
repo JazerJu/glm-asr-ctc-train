@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import re
+import zlib
 import sys
 from pathlib import Path
 
@@ -269,7 +270,11 @@ def build_commonvoice(root: str, lang: str, splits: list[str] = None) -> list[di
             continue
 
         with open(tsv_path, "r", encoding="utf-8", newline="") as f:
-            reader = csv.DictReader(f, delimiter="\t")
+            # QUOTE_NONE 是必须的。Common Voice 的 TSV 不做引号转义，句子里出现的
+            # 半角 " 会被 csv 默认的 quotechar 当成字段起始，把后续若干行并成一行：
+            # ja 的 validated.tsv 因此少读 25,613 行（300,077 -> 274,464，38.0 h），
+            # 另有 52 行文本被拼接污染。yue/zh-HK/zh-TW 恰好没触发，所以一直没暴露。
+            reader = csv.DictReader(f, delimiter="\t", quoting=csv.QUOTE_NONE)
             for row in reader:
                 audio_path = clips_dir / row["path"]
                 if not row["path"].endswith(".mp3"):
@@ -550,6 +555,80 @@ def _clean_gigaspeech_text(text: str) -> str | None:
     return text or None
 
 
+def _clean_reazon_text(text: str) -> str | None:
+    """ReazonSpeech 的字幕文本。只折叠空白，标点保留。
+
+    cv_ja 的文本本来就带「、」「。」，两边要一致，否则同一个语种出现两套标点
+    习惯，CTC 会把标点当成随机噪声学。评测端 normalize() 有 strip_punct，
+    去标点在那一层做，不在这里做。
+    """
+    text = (text or "").replace("\u3000", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text or None
+
+
+def _build_reazon_one_file(args):
+    path, extract_dir, lang, text_key = args
+    rows = _iter_parquet_rows([path], ["audio", text_key])
+    # id_key 故意给一个不存在的列名，让 _extract_parquet_audio 回落到
+    # audio["path"] 的 stem。未过滤版的 name 是 "000/xxxx.flac"，带斜杠，
+    # 直接当文件名会多切出一层目录。
+    return _extract_parquet_audio(
+        rows, extract_dir, "__use_audio_path__", text_key, lang, _clean_reazon_text
+    )
+
+
+def build_reazon(root: str, lang: str = "ja", splits: list[str] | None = None) -> list[dict]:
+    """ReazonSpeech（日语电视广播）的 HF parquet 转换版。
+
+    用的是 japanese-asr/whisper_transcriptions.reazonspeech.* 这一组镜像：
+    官方 reazon-research/reazonspeech 是 gated 的，镜像取不到；这一组不需要授权，
+    parquet 里同样带 FLAC 音频和原始字幕文本。
+
+    两种 schema 都支持：
+      - 未过滤版  name / audio / transcription
+      - wer_10.0  audio / text / whisper_transcript / input_length / labels
+        （只保留原始字幕与 Whisper 转写 WER<=10% 的样本，约 1/3）
+    whisper_transcript 和 labels 是 Whisper 的 token id，我们不用。
+
+    解码加 FLAC 重编码是 CPU 密集的，而每个 parquet 互相独立，所以一个文件一个
+    进程铺开 —— 单线程解 small(6.2 万条)要半小时，large.wer_10.0(104 万条)要
+    十几个小时。已解出的文件在 _extract_parquet_audio 里会跳过，中断重跑即续传。
+
+    root 指到含 parquet 的目录，会递归找。音频解到 <root>/extracted/。
+    """
+    import os
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    root = Path(root)
+    paths = sorted(root.rglob("*.parquet"))
+    if not paths:
+        logger.warning(f"ReazonSpeech: no parquet under {root}")
+        return []
+
+    import pyarrow.parquet as pq
+    names = set(pq.ParquetFile(paths[0]).schema_arrow.names)
+    text_key = "transcription" if "transcription" in names else "text"
+    logger.info(f"ReazonSpeech: {len(paths)} parquet files under {root}, "
+                f"text column = {text_key}")
+
+    extract_dir = root / "extracted"
+    workers = min(len(paths), max(1, os.cpu_count() or 1))
+    samples = []
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_build_reazon_one_file, (path, extract_dir, lang, text_key)): path
+                   for path in paths}
+        for i, future in enumerate(as_completed(futures), 1):
+            path = futures[future]
+            file_samples = future.result()
+            samples.extend(file_samples)
+            logger.info(f"ReazonSpeech: {i}/{len(paths)} files done ({path.name}, "
+                        f"{len(file_samples)} samples, {len(samples)} total so far)")
+
+    logger.info(f"ReazonSpeech: {len(samples)} samples from {root}")
+    return samples
+
+
 def build_talcs(root: str, lang: str = "zh-en", splits: list[str] | None = None) -> list[dict]:
     """TALCS (587h Mandarin-English code-switching, TAL Education Group).
 
@@ -685,7 +764,12 @@ def _extract_parquet_audio(rows, extract_dir: Path, id_key: str, text_key: str,
 
         utt_id = str(row.get(id_key) or Path(audio.get("path") or "utt").stem)
         # Shard into 1000-file directories; a flat dir with 8M files is unusable.
-        shard = f"{abs(hash(utt_id)) % 1000:03d}"
+        # crc32 而不是 hash()：内置 hash 对 str 是带 PYTHONHASHSEED 随机化的，
+        # 每个进程一个种子。用它分片会让同一条 utt 在不同进程/不同次运行里落到
+        # 不同目录，下面那句 out_path.exists() 的续传就永远命中不了 —— 中断重跑
+        # 等于全量重解一遍并且把旧的留成孤儿。实测 reazon small 单线程跑一半后
+        # 换并行重跑，磁盘上留下 34,681 个孤儿 flac。
+        shard = f"{zlib.crc32(utt_id.encode('utf-8')) % 1000:03d}"
         out_dir = extract_dir / shard
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"{utt_id}.{audio_format}"
@@ -817,11 +901,13 @@ DATASET_BUILDERS = {
     "cs_dialogue": build_cs_dialogue,
     "ascend": build_ascend,
     "gigaspeech": build_gigaspeech,
+    "reazon_ja": build_reazon,
 }
 
 # Builders whose signature is (root, lang, splits).
 SPLIT_AWARE_BUILDERS = (
     "aishell1", "librispeech", "talcs", "cs_dialogue", "ascend", "gigaspeech",
+    "reazon_ja",
 )
 
 CV_LANG_MAP = {
@@ -871,6 +957,7 @@ DEFAULT_PATHS = {
     "cs_dialogue": (f"{DATA_ROOT}/cs_dialogue", "zh-en", ["train", "dev", "test"]),
     "ascend": (f"{DATA_ROOT}/ascend", "zh-en", ["train"]),
     "gigaspeech": (f"{DATA_ROOT}/gigaspeech", "en", ["m"]),
+    "reazon_ja": (f"{DATA_ROOT}/reazon_small/hf", "ja", None),
 }
 
 

@@ -473,6 +473,7 @@ class CTCTrainer:
                  blank_id=59263, save_interval=0, keep_last_checkpoints=0,
                  use_compile=False,
                  writer=None, wandb_run=None, wandb_log_checkpoints=False,
+                 wandb_checkpoint_every=0,
                  ddp_no_sync=True, keep_encoder_bf16=True, compile_mode="default",
                  bf16_log_softmax=False, fused_adamw=False,
                  nvtx_profile=False, family=None):
@@ -491,6 +492,7 @@ class CTCTrainer:
         self.writer = writer
         self.wandb_run = wandb_run
         self.wandb_log_checkpoints = wandb_log_checkpoints
+        self.wandb_checkpoint_every = wandb_checkpoint_every
         self.ddp_no_sync = ddp_no_sync
         self.keep_encoder_bf16 = keep_encoder_bf16
         self.bf16_log_softmax = bf16_log_softmax
@@ -806,15 +808,43 @@ class CTCTrainer:
             if self.wandb_run:
                 self.wandb_run.summary["latest_checkpoint"] = str(path)
                 self.wandb_run.summary["latest_checkpoint_step"] = self.global_step
-                if self.wandb_log_checkpoints:
-                    import wandb
-                    artifact = wandb.Artifact(
-                        name=f"ctc-checkpoint-step-{self.global_step}",
-                        type="model",
-                        metadata={"global_step": self.global_step, **(extra or {})},
-                    )
-                    artifact.add_file(path)
-                    self.wandb_run.log_artifact(artifact)
+                if self.wandb_log_checkpoints and self._should_upload(path):
+                    self._upload_checkpoint(path, extra)
+
+    def _should_upload(self, path):
+        """周期性快照按 --wandb-checkpoint-every 抽稀，里程碑始终上传。
+
+        每个 checkpoint 是 ~700 MB。按默认 --save-interval 2000 全传，一个
+        8 小时的轮次要往 W&B 推 20 GB 以上，既慢又没意义 —— 中间快照只是
+        崩溃续训用的，本地留着就够。"""
+        name = Path(path).name
+        if name in ("best.pt", "final.pt") or name.startswith("warmup_epoch"):
+            return True
+        every = self.wandb_checkpoint_every
+        if every <= 0:
+            return True
+        return self.global_step % every == 0
+
+    def _upload_checkpoint(self, path, extra=None):
+        """上传 checkpoint。失败只记日志，绝不让训练挂掉。
+
+        2026-07-06 那轮云上训练就是死在这里：跑完了，最后一个 ~430MB 的
+        artifact 上传到一半连接断了，异常冒到主循环，run 显示 crashed，
+        那个 checkpoint 到 08-24 才手工补传。训练成果不能被一次网络抖动
+        绑架，所以这里整段吞掉异常。"""
+        try:
+            import wandb
+            artifact = wandb.Artifact(
+                name=f"ctc-checkpoint-step-{self.global_step}",
+                type="model",
+                metadata={"global_step": self.global_step, **(extra or {})},
+            )
+            artifact.add_file(path)
+            self.wandb_run.log_artifact(artifact)
+        except Exception as exc:
+            logger.warning(
+                f"W&B 上传 {path} 失败（训练继续）: {type(exc).__name__}: {exc}"
+            )
 
     def load(self, path):
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
@@ -993,6 +1023,9 @@ def main():
     parser.add_argument("--wandb-run-name", default=None)
     parser.add_argument("--wandb-mode", default=os.environ.get("WANDB_MODE", "online"),
                         choices=["online", "offline", "disabled"])
+    parser.add_argument("--wandb-checkpoint-every", type=int, default=0,
+                        help="每隔多少 step 往 W&B 传一次周期性 checkpoint（0=每次都传）。"
+                             "best/final/warmup 不受此限制，始终上传。")
     parser.add_argument("--wandb-log-checkpoints", action="store_true",
                         help="Upload checkpoint files as W&B artifacts. Large: ~413MB each.")
     args = parser.parse_args()
@@ -1180,6 +1213,7 @@ def main():
         writer=writer,
         wandb_run=wandb_run,
         wandb_log_checkpoints=args.wandb_log_checkpoints,
+        wandb_checkpoint_every=args.wandb_checkpoint_every,
         ddp_no_sync=args.ddp_no_sync,
         keep_encoder_bf16=args.keep_encoder_bf16,
         use_compile=args.compile_decoder,
