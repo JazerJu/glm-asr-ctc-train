@@ -569,12 +569,24 @@ def _clean_reazon_text(text: str) -> str | None:
 
 def _build_reazon_one_file(args):
     path, extract_dir, lang, text_key = args
-    rows = _iter_parquet_rows([path], ["audio", text_key])
-    # id_key 故意给一个不存在的列名，让 _extract_parquet_audio 回落到
-    # audio["path"] 的 stem。未过滤版的 name 是 "000/xxxx.flac"，带斜杠，
-    # 直接当文件名会多切出一层目录。
+
+    def _rows():
+        """给每行现造一个 utt id：分片名 + 行号。
+
+        两个版本的 schema 都没有能直接用的 id：未过滤版的 name 是
+        "000/xxxx.flac"，带斜杠，当文件名会多切出一层目录；wer_10.0 版更糟，
+        audio.path 是 None 且没有 name 列。后者不处理的话每行都退化成字面量
+        "utt"，104 万条全指向同一个文件，并行解压时多个进程同写一个 flac
+        直接把它写坏（2026-09-07 实测：193 个进程同写 894/utt.flac，
+        soundfile 报 Format not recognised）。
+        分片名加行号是确定性的，跨进程唯一，重跑也稳定。
+        """
+        for i, row in enumerate(_iter_parquet_rows([path], ["audio", text_key])):
+            row["__uid__"] = f"{path.stem}_{i:06d}"
+            yield row
+
     return _extract_parquet_audio(
-        rows, extract_dir, "__use_audio_path__", text_key, lang, _clean_reazon_text
+        _rows(), extract_dir, "__uid__", text_key, lang, _clean_reazon_text
     )
 
 
@@ -751,7 +763,7 @@ def _extract_parquet_audio(rows, extract_dir: Path, id_key: str, text_key: str,
     samples = []
     dropped_text = dropped_long = failed = 0
 
-    for row in rows:
+    for row_idx, row in enumerate(rows):
         text = clean(row.get(text_key) or "")
         if not text:
             dropped_text += 1
@@ -762,7 +774,11 @@ def _extract_parquet_audio(rows, extract_dir: Path, id_key: str, text_key: str,
             failed += 1
             continue
 
-        utt_id = str(row.get(id_key) or Path(audio.get("path") or "utt").stem)
+        # 兜底带行号：某些 HF 转换版的 audio.path 是 None（reazon 的 wer_10.0
+        # 就是），固定回落成 "utt" 会让所有行指向同一个文件，并行写还会写坏它。
+        utt_id = str(row.get(id_key)
+                     or Path(audio.get("path") or "").stem
+                     or f"utt{row_idx:08d}")
         # Shard into 1000-file directories; a flat dir with 8M files is unusable.
         # crc32 而不是 hash()：内置 hash 对 str 是带 PYTHONHASHSEED 随机化的，
         # 每个进程一个种子。用它分片会让同一条 utt 在不同进程/不同次运行里落到
@@ -902,12 +918,13 @@ DATASET_BUILDERS = {
     "ascend": build_ascend,
     "gigaspeech": build_gigaspeech,
     "reazon_ja": build_reazon,
+    "reazon_ja_large": build_reazon,
 }
 
 # Builders whose signature is (root, lang, splits).
 SPLIT_AWARE_BUILDERS = (
     "aishell1", "librispeech", "talcs", "cs_dialogue", "ascend", "gigaspeech",
-    "reazon_ja",
+    "reazon_ja", "reazon_ja_large",
 )
 
 CV_LANG_MAP = {
@@ -958,6 +975,8 @@ DEFAULT_PATHS = {
     "ascend": (f"{DATA_ROOT}/ascend", "zh-en", ["train"]),
     "gigaspeech": (f"{DATA_ROOT}/gigaspeech", "en", ["m"]),
     "reazon_ja": (f"{DATA_ROOT}/reazon_small/hf", "ja", None),
+    # large.wer_10.0：约 2,050h，标注过 Whisper 一致性过滤（保留 41%）。
+    "reazon_ja_large": (f"{DATA_ROOT}/reazon_large/hf", "ja", None),
 }
 
 

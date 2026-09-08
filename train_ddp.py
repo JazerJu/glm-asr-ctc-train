@@ -473,7 +473,7 @@ class CTCTrainer:
                  blank_id=59263, save_interval=0, keep_last_checkpoints=0,
                  use_compile=False,
                  writer=None, wandb_run=None, wandb_log_checkpoints=False,
-                 wandb_checkpoint_every=0,
+                 wandb_checkpoint_every=0, resume_lr=0.0,
                  ddp_no_sync=True, keep_encoder_bf16=True, compile_mode="default",
                  bf16_log_softmax=False, fused_adamw=False,
                  nvtx_profile=False, family=None):
@@ -493,6 +493,7 @@ class CTCTrainer:
         self.wandb_run = wandb_run
         self.wandb_log_checkpoints = wandb_log_checkpoints
         self.wandb_checkpoint_every = wandb_checkpoint_every
+        self.resume_lr = resume_lr
         self.ddp_no_sync = ddp_no_sync
         self.keep_encoder_bf16 = keep_encoder_bf16
         self.bf16_log_softmax = bf16_log_softmax
@@ -864,6 +865,17 @@ class CTCTrainer:
             self.optimizer.load_state_dict(checkpoint["optimizer"])
         if "scheduler" in checkpoint:
             self.scheduler.load_state_dict(checkpoint["scheduler"])
+            # load_state_dict 把 base_lrs 也一起恢复了，所以 resume 之后 --lr 是
+            # 完全无效的 —— 实际 LR 只由「上一轮的峰值 × 余弦位置」决定。这点很
+            # 容易踩：2026-09-07 从 r2(step 142,295) 接续时 --lr 1e-4 被无视，
+            # 实际跑在 3.5e-6，那个速率下八千步什么都动不了。
+            # --resume-lr 就是用来显式盖掉这个峰值的。
+            if self.resume_lr:
+                for group in self.optimizer.param_groups:
+                    group["initial_lr"] = self.resume_lr
+                self.scheduler.base_lrs = [self.resume_lr] * len(self.scheduler.base_lrs)
+                if is_rank0():
+                    logger.info(f"覆盖 scheduler 峰值 LR -> {self.resume_lr:g}")
         self.global_step = checkpoint.get("global_step", 0)
         if is_rank0():
             logger.info(f"Resumed from step {self.global_step}: {path}")
@@ -963,6 +975,10 @@ def main():
                         help="Keep only the newest N periodic step_*.pt files "
                              "(0 keeps all). warmup_epoch*/best/final are never pruned.")
     parser.add_argument("--resume", default=None)
+    parser.add_argument("--resume-lr", type=float, default=0.0,
+                        help="接续时覆盖 scheduler 的峰值 LR。0=沿用 checkpoint 里的。"
+                             "不给这个的话 --lr 在 resume 后是无效的（base_lrs 会被"
+                             "load_state_dict 一起恢复）。")
     parser.add_argument("--val-split", type=float, default=0.02)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--ctc-hidden", type=int, default=512)
@@ -1214,6 +1230,7 @@ def main():
         wandb_run=wandb_run,
         wandb_log_checkpoints=args.wandb_log_checkpoints,
         wandb_checkpoint_every=args.wandb_checkpoint_every,
+        resume_lr=args.resume_lr,
         ddp_no_sync=args.ddp_no_sync,
         keep_encoder_bf16=args.keep_encoder_bf16,
         use_compile=args.compile_decoder,
