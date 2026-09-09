@@ -185,6 +185,37 @@ BATCH_PER_CARD=32; NPROC_N=7
 - **`scripts/npu_card_check.py`**（新）：逐卡 H2D 拷贝 + 流同步 + matmul 体检。
   坏卡是挂住不返回而非报错，所以带超时判定。
 
+### 导出时别重导编码器和 decoder（省 20 分钟和 3.3 GB）
+
+**每轮只有 CTC 头会变，编码器是冻结的、decoder 来自 Qwen3-ASR-1.7B 官方权重。**
+所以 04/05 两步（Decoder GGUF）根本不用跑，编码器也不用重导 —— 直接软链上一轮的：
+
+```bash
+cd Qwen3-ASR-CTC-GGUF/model-<新一轮>
+for f in Qwen3-ASR-Encoder.{fp32,fp16,q4,q4f16}.onnx \
+         Qwen3-ASR-Decoder.{fp16,q5_k_m}.gguf tokens.txt; do
+    ln -sf "../model/$f" "$f"
+done
+```
+
+实测佐证（r1 的 `model/` vs 本轮重导的）：
+
+| 文件 | 结果 |
+| --- | --- |
+| `Qwen3-ASR-Decoder.q5_k_m.gguf` / `.fp16.gguf` | **MD5 逐字节相同** |
+| `tokens.txt` | **MD5 逐字节相同** |
+| `Qwen3-ASR-Encoder.*.onnx` | 差约 1.8 万字节 —— 图元数据/节点命名层面（transformers 版本不同），**权重没变** |
+
+2026-09-09 这一轮我把所有文件都实拷了一份，`model-ja-read/` 一度 8.2 GB；
+按上面软链之后 **511 MB**，且新导的那个编码器从头到尾没被任何评测加载过
+（bench 的两个引擎都读 `bench-asr-ctc/models/qwen-ctc/` 那份共享编码器，
+MD5 与 r1 的 `model/` 一致）。**下次只跑 01→03。**
+
+顺带记一下 CTC 头那 511 MB 的构成，免得下次又觉得「怎么这么大」：
+同一个 48,344,468 参数的头存了五份精度 —— fp32 184.5 MB（= 48.3M×4，对得上）、
+opt.fp32 184.4 MB、fp16 92.3 MB、q4f16 24.1 MB、**q4 25.1 MB（实际部署的只有这个）**。
+两份 fp32 是量化前的中间产物，留着是为了改量化参数时不用从 01 重导。
+
 ### .92 上的导出环境（不在本仓库，但会绊住下一个人）
 
 - `py310torch` 里 `huggingface-hub` 是 1.17.0，与 `transformers` 要求的 `<1.0` 冲突。
