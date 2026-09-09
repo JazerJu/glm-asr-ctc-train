@@ -255,13 +255,23 @@ def build_zeroth(root: str, lang: str = "ko") -> list[dict]:
 
 
 
-def build_commonvoice(root: str, lang: str, splits: list[str] = None) -> list[dict]:
+def build_commonvoice(root: str, lang: str, splits: list[str] = None,
+                      min_up_votes: int = 0, max_down_votes: int | None = None) -> list[dict]:
+    """min_up_votes / max_down_votes 只对 other.tsv 有意义。
+
+    other 是「已录但还没攒够验证票」的池子，录制流程和 validated 完全相同
+    （同一批朗读脚本、同一个 Web 录音器），不是另一个领域。它没进 validated
+    只是因为票数不够 —— ja 的验证者太少。取 up>=1 且 down==0，等于「至少一个
+    人听过并认可、没有人反对」，比无过滤干净得多：229,584 行里有 61,649 条
+    满足，74.6 小时。
+    """
     root = Path(root)
     if splits is None:
         splits = ["train", "dev", "test"]
 
     clips_dir = root / "clips"
     samples = []
+    dropped_votes = 0
 
     for split in splits:
         tsv_path = root / f"{split}.tsv"
@@ -276,6 +286,16 @@ def build_commonvoice(root: str, lang: str, splits: list[str] = None) -> list[di
             # 另有 52 行文本被拼接污染。yue/zh-HK/zh-TW 恰好没触发，所以一直没暴露。
             reader = csv.DictReader(f, delimiter="\t", quoting=csv.QUOTE_NONE)
             for row in reader:
+                if min_up_votes or max_down_votes is not None:
+                    try:
+                        up = int(row.get("up_votes") or 0)
+                        down = int(row.get("down_votes") or 0)
+                    except ValueError:
+                        dropped_votes += 1
+                        continue
+                    if up < min_up_votes or (max_down_votes is not None and down > max_down_votes):
+                        dropped_votes += 1
+                        continue
                 audio_path = clips_dir / row["path"]
                 if not row["path"].endswith(".mp3"):
                     audio_path = clips_dir / (row["path"] + ".mp3")
@@ -287,7 +307,8 @@ def build_commonvoice(root: str, lang: str, splits: list[str] = None) -> list[di
                         "lang": lang,
                     })
 
-    logger.info(f"Common Voice ({lang}): {len(samples)} samples from {root}")
+    logger.info(f"Common Voice ({lang}): {len(samples)} samples from {root}"
+                + (f" (投票过滤丢弃 {dropped_votes})" if dropped_votes else ""))
     return samples
 
 
@@ -906,6 +927,74 @@ def build_gigaspeech(root: str, lang: str = "en", splits: list[str] | None = Non
     logger.info(f"GigaSpeech: {len(samples)} samples from {root}")
     return samples
 
+def build_jsut(root: str, lang: str = "ja") -> list[dict]:
+    """JSUT basic5000：单说话人日语朗读，HF parquet（audio + transcription）。
+
+    只有 5,000 条，是全部落到一个说话人上的干净朗读音 —— 补的是「朗读语域」，
+    不是数据量。和 FLEURS 同域，但说话人单一，所以只能当调味料，不能当主菜。
+    """
+    import glob
+    root = Path(root)
+    files = sorted(glob.glob(str(root / "**" / "*.parquet"), recursive=True))
+    if not files:
+        logger.warning(f"JSUT: no parquet under {root}")
+        return []
+
+    extract_dir = root / "extracted"
+
+    def _rows():
+        for i, row in enumerate(_iter_parquet_rows(files, ["audio", "transcription"])):
+            row["__uid__"] = f"jsut_{i:06d}"
+            yield row
+
+    samples = _extract_parquet_audio(_rows(), extract_dir, "__uid__", "transcription",
+                                     lang, lambda t: (t or "").strip())
+    logger.info(f"JSUT ({lang}): {len(samples)} samples")
+    return samples
+
+
+def build_tts_ja(root: str, lang: str = "ja") -> list[dict]:
+    """TTS 合成的日语朗读语料（FishAudioS2 + FireRedTTS3）。
+
+    root 下递归找 manifest_*.jsonl / manifest.jsonl，字段已经是训练用的格式
+    （audio_path/text/lang/duration），只需校验文件在不在、去掉重复的 audio_path。
+    两个引擎念同一句是有意为之的增广，所以按 audio_path 去重而不是按 text。
+    """
+    import glob, json
+    root = Path(root)
+    files = sorted(glob.glob(str(root / "**" / "manifest*.jsonl"), recursive=True))
+    if not files:
+        logger.warning(f"TTS ja: no manifest under {root}")
+        return []
+
+    seen, samples, missing = set(), [], 0
+    for mf in files:
+        with open(mf, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ap = r.get("audio_path")
+                if not ap or ap in seen:
+                    continue
+                if not os.path.exists(ap):
+                    missing += 1
+                    continue
+                seen.add(ap)
+                row = {"audio_path": ap, "text": r["text"], "lang": r.get("lang", lang)}
+                if r.get("duration"):
+                    row["duration"] = r["duration"]
+                samples.append(row)
+
+    logger.info(f"TTS ja: {len(samples)} samples from {len(files)} manifests"
+                + (f"（{missing} 条音频缺失，已跳过）" if missing else ""))
+    return samples
+
+
 DATASET_BUILDERS = {
     "aishell1": build_aishell1,
     "librispeech": build_librispeech,
@@ -919,6 +1008,8 @@ DATASET_BUILDERS = {
     "gigaspeech": build_gigaspeech,
     "reazon_ja": build_reazon,
     "reazon_ja_large": build_reazon,
+    "jsut": build_jsut,
+    "tts_ja": build_tts_ja,
 }
 
 # Builders whose signature is (root, lang, splits).
@@ -929,9 +1020,16 @@ SPLIT_AWARE_BUILDERS = (
 
 CV_LANG_MAP = {
     "cv_yue": ("yue",),
+    "cv_ja_other": ("ja",),
     "cv_zh_hk": ("zh-HK",),
     "cv_ja": ("ja",),
     "cv_zh_tw": ("zh-TW",),
+}
+
+# other.tsv 专用的投票门槛：(min_up_votes, max_down_votes)。
+# 只挂在 cv_ja_other 上，validated 那几条不过滤（它们本来就是验证过的）。
+CV_VOTE_FILTERS = {
+    "cv_ja_other": (1, 0),
 }
 
 MLS_LANG_MAP = {
@@ -977,6 +1075,10 @@ DEFAULT_PATHS = {
     "reazon_ja": (f"{DATA_ROOT}/reazon_small/hf", "ja", None),
     # large.wer_10.0：约 2,050h，标注过 Whisper 一致性过滤（保留 41%）。
     "reazon_ja_large": (f"{DATA_ROOT}/reazon_large/hf", "ja", None),
+    # 2026-09 朗读语域补充轮。
+    "cv_ja_other": (f"{DATA_ROOT}/cv-corpus-26.0-2026-06-12/ja", "ja", ["other"]),
+    "jsut": (f"{DATA_ROOT}/jsut/hf", "ja", None),
+    "tts_ja": (f"{DATA_ROOT}/tts_ja", "ja", None),
 }
 
 
@@ -985,7 +1087,8 @@ def build_all():
         if os.path.exists(path):
             logger.info(f"=== Building {name} ===")
             if name in CV_LANG_MAP:
-                samples = build_commonvoice(path, lang, splits)
+                up, down = CV_VOTE_FILTERS.get(name, (0, None))
+                samples = build_commonvoice(path, lang, splits, up, down)
             elif name.startswith("mls_"):
                 samples = build_mls(path, lang, splits)
             elif name in SPLIT_AWARE_BUILDERS:
@@ -1015,7 +1118,8 @@ def main():
 
     if args.dataset in CV_LANG_MAP:
         lang = CV_LANG_MAP[args.dataset][0]
-        samples = build_commonvoice(args.root or ".", lang, args.splits)
+        up, down = CV_VOTE_FILTERS.get(args.dataset, (0, None))
+        samples = build_commonvoice(args.root or ".", lang, args.splits, up, down)
     elif args.dataset.startswith("mls_"):
         lang = MLS_LANG_MAP.get(args.dataset, args.lang)
         samples = build_mls(args.root or ".", lang, args.splits)

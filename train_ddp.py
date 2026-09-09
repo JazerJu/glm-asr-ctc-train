@@ -848,7 +848,14 @@ class CTCTrainer:
             )
 
     def load(self, path):
-        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+        # map_location 必须是 "cpu"，不能是 self.device。
+        # 2026-09-08：8 个 rank 同时把 580 MB 的 checkpoint 直接搬进 NPU，H2D 拷贝
+        # 把设备流占满，rank0 已经进了 DDP 的参数 Broadcast 却等不到其余 rank，
+        # 1836s 后 HCCL 看门狗拆掉通信域，rank1-7 全部倒在
+        #     RuntimeError: ACL stream synchronize failed, error code:507048
+        # 读到 CPU 再由 load_state_dict 逐张量拷进已有的设备参数，既不占设备流，
+        # 峰值内存也只多一份 CPU 副本（这台机器 2 TB 内存，无所谓）。
+        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
         # The char-vocab experiments left checkpoints with 6857 classes lying
         # around next to the 59264-class BPE ones; load_state_dict would only
         # report an opaque size mismatch.
