@@ -117,18 +117,41 @@ FireRedTTS3 是 0.397，看着低，但 ASR 校验 19.91% 说明只是语速起�
 
 ---
 
-## 4. npu107 的 card 5 已损坏（重要）
+## 4. npu107 的 card 5：起训前必须自己验一遍
 
-**起训前必须把 card 5 排除，否则必炸。**
+**这是 2026-09-08/09 那个时间点的观测，不是永久结论。** 卡的状态会变 ——
+重启整机、复位、或者本来就是一次瞬时故障，都可能让它恢复。
+**下一次起训之前请亲自跑一遍体检，不要照抄下面的 7 卡配置。**
+
+```bash
+source scripts/_ascend_env.sh
+python scripts/npu_card_check.py          # 逐卡 H2D 拷贝 + 流同步 + matmul
+```
+
+健康卡约 1.1s 返回；**坏卡的表现是挂住不返回，不是抛异常**，所以脚本带 60s
+超时，超时即判不可用。脚本会直接把该用的 `ASCEND_RT_VISIBLE_DEVICES` 和
+`NPROC_N` 打印出来，照着填进 `scripts/run_ja2.sh` 即可。
+
+**为什么值得花这一分钟**：多卡训练里坏卡不会「报错」，它会让 HCCL 一直等，
+到 `HCCL_EXEC_TIMEOUT`（默认 1836s）才拆通信域，届时崩在完全不相干的地方
+（`torch.load` / `load_state_dict` 的设备拷贝），排查方向全被带偏。
+2026-09-08 就为此白烧了两次起训、一个多小时，最后才靠逐卡测试定位到。
+
+### 当时的观测（供比对）
 
 | 证据 | |
 | --- | --- |
 | `npu-smi info -t health -i 5` | **`Alarm`**，其余七张 `OK` |
-| 逐卡 H2D 拷贝 + 流同步测试 | 0/1/2/3/4/6/7 各 1.1s 通过；**card 5 挂住 8 分钟不返回** |
+| 逐卡 H2D 拷贝 + 流同步 | 0/1/2/3/4/6/7 各 1.1s 通过；**card 5 挂住 8 分钟不返回** |
 | 卡上的进程 | D 状态，`kill -9` 杀不掉 |
 | 两次起训失败 | **rank5 都是第一个**报 `ACL stream synchronize failed`（507034/507048） |
 
-`scripts/run_ja2.sh` 里已经写死：
+复位要 `npu-smi set -t reset -i 5`；当时那个 D 状态进程占着它，大概率得重启整机。
+本轮没有条件重启（训练在跑），所以按 7 卡走完。
+
+### 排除坏卡的正确写法
+
+`scripts/run_ja2.sh` 里当前写的是：
 
 ```bash
 export ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,6,7
@@ -136,15 +159,11 @@ BATCH_PER_CARD=32; NPROC_N=7
 ```
 
 **只把 `NPROC` 改成 7 没用** —— torchrun 只认 `nproc_per_node`，rank N 绑 npu:N，
-会用 0..6，照样踩上坏卡。必须靠 `ASCEND_RT_VISIBLE_DEVICES` 做重映射。
+会用 0..6，照样踩上 card 5。必须靠 `ASCEND_RT_VISIBLE_DEVICES` 做重映射。
 
-代价：每步 224 样本（原 256），一个 epoch 38,909 步（原 34,045），墙钟慢约 14%。
-本轮实测 2.50 步/秒，约 4h20m 跑完。
-
-复位需要 `npu-smi set -t reset -i 5`，但那个 D 状态进程大概率要重启整机才能清掉。
-**目前无法修复，按 7 卡走。**
-
----
+7 卡的代价：每步 224 样本（8 卡是 256），一个 epoch 38,909 步（8 卡是 34,045），
+墙钟慢约 14%。本轮实测 2.50 步/秒，约 4h20m 跑完。
+**如果体检显示 8 张全好，记得把这两行改回 8 卡**，步数会跟着变（脚本自动算）。
 
 ## 5. 这一轮改了什么代码
 
@@ -155,13 +174,16 @@ BATCH_PER_CARD=32; NPROC_N=7
 - **`train_ddp.py`**：`load()` 的 `map_location` 从 `self.device` 改成 `"cpu"`。
   8 个 rank 同时把 580 MB 直接搬进 NPU 会占死设备流，HCCL 看门狗 1836s 后拆通信域。
   **这一条没能解决当时的崩溃**（只是把失败点从 `torch.load` 挪到 `load_state_dict`），
-  真正的元凶是 card 5；但改动本身是对的，保留。
+  真正的元凶是当时的 card 5；但改动本身是对的，保留。
 - **`scripts/ckpt_to_safetensors.py`**（新）：`best.pt` → `{config.json,
   ctc_head.safetensors}`。以前这一步是手工做的。**必须在 npu107 上跑** —— checkpoint
   的 pickle 带 `torch_npu` 的重建函数，别的机器 `torch.load` 直接
   `ModuleNotFoundError: No module named 'torch_npu'`。转完只需拷 193 MB 过去。
   已用 v1-ja 验证：产出的两个文件与既有产物 **MD5 完全一致**。
-- **`scripts/run_ja2.sh`**（新）：本轮的启动器，含 7 卡绕坏卡与 `HCCL_EXEC_TIMEOUT=3600`。
+- **`scripts/run_ja2.sh`**（新）：本轮的启动器，含 `HCCL_EXEC_TIMEOUT=3600` 与
+  当时排除 card 5 的 7 卡配置 —— **起训前请按 §4 先体检，卡的状态会变，别照抄。**
+- **`scripts/npu_card_check.py`**（新）：逐卡 H2D 拷贝 + 流同步 + matmul 体检。
+  坏卡是挂住不返回而非报错，所以带超时判定。
 
 ### .92 上的导出环境（不在本仓库，但会绊住下一个人）
 
