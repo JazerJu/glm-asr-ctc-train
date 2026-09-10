@@ -589,7 +589,11 @@ def _clean_reazon_text(text: str) -> str | None:
 
 
 def _build_reazon_one_file(args):
-    path, extract_dir, lang, text_key = args
+    if len(args) == 5:
+        path, extract_dir, lang, text_key, exclude_keys = args
+    else:
+        path, extract_dir, lang, text_key = args
+        exclude_keys = None
 
     def _rows():
         """给每行现造一个 utt id：分片名 + 行号。
@@ -607,7 +611,8 @@ def _build_reazon_one_file(args):
             yield row
 
     return _extract_parquet_audio(
-        _rows(), extract_dir, "__uid__", text_key, lang, _clean_reazon_text
+        _rows(), extract_dir, "__uid__", text_key, lang, _clean_reazon_text,
+        exclude_keys=exclude_keys,
     )
 
 
@@ -769,7 +774,8 @@ def _iter_parquet_rows(parquet_paths, columns):
 
 
 def _extract_parquet_audio(rows, extract_dir: Path, id_key: str, text_key: str,
-                           lang: str, clean, audio_format: str = "flac") -> list[dict]:
+                           lang: str, clean, audio_format: str = "flac",
+                           exclude_keys: set | None = None) -> list[dict]:
     """Write the audio embedded in HF parquet out to files and build manifest rows.
 
     HF stores audio as {"bytes": <encoded file>, "path": <name>}. Re-encoding to
@@ -782,7 +788,7 @@ def _extract_parquet_audio(rows, extract_dir: Path, id_key: str, text_key: str,
 
     extract_dir.mkdir(parents=True, exist_ok=True)
     samples = []
-    dropped_text = dropped_long = failed = 0
+    dropped_text = dropped_long = failed = dropped_dup = 0
 
     for row_idx, row in enumerate(rows):
         text = clean(row.get(text_key) or "")
@@ -831,6 +837,15 @@ def _extract_parquet_audio(rows, extract_dir: Path, id_key: str, text_key: str,
                 dropped_long += 1
                 continue
 
+        # 跨数据集去重。键是 (文本, 时长精确到毫秒)：ReazonSpeech 的不同 split 之间
+        # 大量重叠（split_0/1 和 large.wer_10.0 重合 99.2%），但只按文本去重会误杀——
+        # 我们已有的 1,042,883 条里只有 762,958 个不同文本，「はい」这类短句本来就
+        # 反复出现。加上毫秒级时长后唯一率升到 93.3%，剩下的碰撞基本是真重复
+        # （ReazonSpeech 收录了重播节目）。
+        if exclude_keys is not None and (text, round(duration, 3)) in exclude_keys:
+            dropped_dup += 1
+            continue
+
         samples.append({
             "audio_path": str(out_path),
             "text": text,
@@ -839,7 +854,8 @@ def _extract_parquet_audio(rows, extract_dir: Path, id_key: str, text_key: str,
         })
 
     logger.info(f"  extracted {len(samples)}, dropped {dropped_text} empty/tagged, "
-                f"{dropped_long} over {MAX_UTT_SEC}s, {failed} unreadable")
+                f"{dropped_long} over {MAX_UTT_SEC}s, {failed} unreadable"
+                + (f", {dropped_dup} 与已有数据重复" if exclude_keys is not None else ""))
     return samples
 
 
@@ -995,6 +1011,61 @@ def build_tts_ja(root: str, lang: str = "ja") -> list[dict]:
     return samples
 
 
+def build_reazon_all2(root: str, lang: str = "ja", splits: list[str] | None = None) -> list[dict]:
+    """ReazonSpeech `all.wer_10.0` 的 split_2，扣掉与 `large.wer_10.0` 重复的部分。
+
+    这一档的结构很容易踩坑：仓库根下有 split_0..split_7 八个目录，HF 元数据报的
+    「902,252 条 / 126 GB」是**单个 split** 的量，全量其实是 8 倍。而且各 split 与
+    我们已在用的 large.wer_10.0 重合率两极分化，逐个抽样实测：
+
+        split_0 / split_1   重合 99.2%  —— 就是我们已有的那份，净增约 10 h
+        split_2 ~ split_7   重合 ~31%   —— 各自净增约 865 h
+
+    所以取 split_2。转写质量八个 split 同档（字幕 vs Whisper 转写的字符级 CER
+    中位 0.0%、均值 1.5-2.3%、85-89% 逐字一致），不存在质量降级。
+
+    另外 medium 这条路走不通：`medium.wer_10.0` 与 large.wer_10.0 重合 99.3%，
+    净增量约等于零。
+
+    去重集合从 REAZON_DEDUP_AGAINST 指定的 manifest 读，键是 (文本, 时长毫秒)。
+    """
+    import glob
+
+    root = Path(root)
+    files = sorted(Path(x) for x in glob.glob(str(root / "**" / "*.parquet"), recursive=True))
+    if not files:
+        logger.warning(f"reazon all2: no parquet under {root}")
+        return []
+
+    exclude_keys = set()
+    ref = os.environ.get("REAZON_DEDUP_AGAINST", str(OUTPUT_DIR / "reazon_ja_large.jsonl"))
+    if os.path.exists(ref):
+        with open(ref, encoding="utf-8") as f:
+            for line in f:
+                r = json.loads(line)
+                if r.get("duration") is not None:
+                    exclude_keys.add((r["text"], round(r["duration"], 3)))
+        logger.info(f"reazon all2: 去重基准 {ref}，{len(exclude_keys)} 个键")
+    else:
+        logger.warning(f"reazon all2: 去重基准不存在 {ref}，将不去重")
+
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    extract_dir = root / "extracted"
+    text_key = "text"
+    args = [(f, extract_dir, lang, text_key, exclude_keys) for f in files]
+    workers = min(len(args), max(1, os.cpu_count() or 1))
+    samples = []
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        futs = [pool.submit(_build_reazon_one_file, a) for a in args]
+        for i, fu in enumerate(as_completed(futs), 1):
+            samples.extend(fu.result())
+            if i % 20 == 0:
+                logger.info(f"  reazon all2: {i}/{len(futs)} 分片，已保留 {len(samples)} 条")
+    logger.info(f"ReazonSpeech all2 ({lang}): {len(samples)} samples from {len(files)} parquet")
+    return samples
+
+
 DATASET_BUILDERS = {
     "aishell1": build_aishell1,
     "librispeech": build_librispeech,
@@ -1008,6 +1079,7 @@ DATASET_BUILDERS = {
     "gigaspeech": build_gigaspeech,
     "reazon_ja": build_reazon,
     "reazon_ja_large": build_reazon,
+    "reazon_ja_all2": build_reazon_all2,
     "jsut": build_jsut,
     "tts_ja": build_tts_ja,
 }
@@ -1075,6 +1147,8 @@ DEFAULT_PATHS = {
     "reazon_ja": (f"{DATA_ROOT}/reazon_small/hf", "ja", None),
     # large.wer_10.0：约 2,050h，标注过 Whisper 一致性过滤（保留 41%）。
     "reazon_ja_large": (f"{DATA_ROOT}/reazon_large/hf", "ja", None),
+    # all.wer_10.0 的 split_2，已扣掉与 large.wer_10.0 的重复
+    "reazon_ja_all2": (f"{DATA_ROOT}/reazon_all/split_2", "ja", None),
     # 2026-09 朗读语域补充轮。
     "cv_ja_other": (f"{DATA_ROOT}/cv-corpus-26.0-2026-06-12/ja", "ja", ["other"]),
     "jsut": (f"{DATA_ROOT}/jsut/hf", "ja", None),
@@ -1104,7 +1178,10 @@ def main():
     parser = argparse.ArgumentParser(description="Build JSONL manifests for CTC training")
     parser.add_argument("--dataset", help="Dataset name (aishell1, librispeech, ksponspeech, zeroth, cv, mls, magicdata, wenetspeech, talcs, cs_dialogue, ascend, gigaspeech)")
     parser.add_argument("--root", help="Dataset root directory")
-    parser.add_argument("--lang", default="zh", help="Language code")
+    # 默认必须是 None 而不是 "zh"：不显式传 --lang 时，应该沿用 DEFAULT_PATHS 里
+    # 为该数据集登记的语种。2026-09-09 就是因为默认 zh，reazon_ja_all2 的 81.7 万条
+    # 日语全被标成中文，事后才发现。
+    parser.add_argument("--lang", default=None, help="Language code（默认取 DEFAULT_PATHS 登记值）")
     parser.add_argument("--splits", nargs="+", default=None, help="Splits for CV/MLS (default: train dev test)")
     parser.add_argument("--all", action="store_true", help="Build all with default paths")
     args = parser.parse_args()
@@ -1115,6 +1192,10 @@ def main():
 
     if not args.dataset:
         parser.error("--dataset or --all required")
+
+    # 没显式指定语种时，优先用 DEFAULT_PATHS 里为该数据集登记的那个
+    if args.lang is None:
+        args.lang = DEFAULT_PATHS.get(args.dataset, (None, "zh", None))[1]
 
     if args.dataset in CV_LANG_MAP:
         lang = CV_LANG_MAP[args.dataset][0]
