@@ -42,6 +42,14 @@ def main():
         "num_heads": cfg["num_heads"],
         "ffn_hidden": cfg["ffn_hidden"],
         "vocab_size": cfg["vocab_size"],
+        # Self-conditioned CTC 的 conditioning_layer **参与推理前向**（不像
+        # Intermediate CTC 只活在训练期），导出方必须照着建图，否则少一条
+        # 「中间层预测投回主干」的通路，权重能加载但输出是错的。
+        # config 里没有就看 state_dict 有没有这个键 —— 2026-09-09 那一轮起训时
+        # save() 还没写这个字段，state_dict 才是权威。
+        "self_cond": bool(cfg.get("self_cond", False)) or any(
+            k.startswith("conditioning_layer.") for k in sd),
+        "inter_layers": [1, 3],
         "blank_id": cfg["blank_id"],
         "unk_id": cfg["blank_id"] + BLANK_OFFSET_UNK,
         # 13 fps / 76.9 ms 是 Qwen3-ASR 编码器的固有帧率，不是 GLM 的 50 fps。

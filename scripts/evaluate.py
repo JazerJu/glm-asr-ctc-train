@@ -263,6 +263,12 @@ def build_model(args, device):
         logger.warning(f"checkpoint blank_id={ck_blank} 与词表 {blank_id} 不一致，用前者")
         blank_id = ck_blank
 
+    # Self-conditioned CTC（--self-cond）会多一层 conditioning_layer，而且它**参与
+    # 推理前向**，不像 InterCTC 那样只活在训练期。所以重建时必须知道有没有它。
+    # 优先看 config；但 2026-09-09 那一轮起训时 save() 还没往 config 写这个字段，
+    # 所以退回去看 state_dict 里有没有这个键——那才是权威。
+    self_cond = bool(cfg.get("self_cond", False)) or any(
+        k.startswith("conditioning_layer.") for k in ckpt["ctc_decoder"])
     decoder = CTCDecoder(
         encoder_dim=family.hidden_size,
         ctc_hidden=cfg.get("ctc_hidden", args.ctc_hidden),
@@ -270,10 +276,13 @@ def build_model(args, device):
         num_blocks=cfg.get("num_blocks", args.ctc_blocks),
         num_heads=cfg.get("num_heads") or args.ctc_heads,
         ffn_hidden=cfg.get("ffn_hidden") or args.ctc_ffn,
+        self_cond=self_cond,
         vocab_size=total_classes,
         dropout=0.0,
         blank_id=blank_id,
     )
+    if self_cond:
+        logger.info("checkpoint 带 conditioning_layer，按 Self-conditioned CTC 重建")
     decoder.load_state_dict(ckpt["ctc_decoder"])
     decoder = decoder.to(device, dtype=torch.float32).eval()
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import array
+import copy
 import json
 import logging
 import math
@@ -154,7 +155,7 @@ class TransformerBlock(nn.Module):
 
 class CTCDecoder(nn.Module):
     def __init__(self, encoder_dim=1280, ctc_hidden=512, proj_hidden=2048,
-                 num_blocks=5, num_heads=8, ffn_hidden=128,
+                 num_blocks=5, num_heads=8, ffn_hidden=128, self_cond=False,
                  vocab_size=59264, dropout=0.1, blank_id=59263):
         super().__init__()
         self.blank_id = blank_id
@@ -166,6 +167,21 @@ class CTCDecoder(nn.Module):
         ])
         self.layer_norm = nn.LayerNorm(ctc_hidden)
         self.ctc_lo = nn.Linear(ctc_hidden, vocab_size)
+        # Intermediate CTC 的挂载点。5 层挂第 2、4 层（下标 1、3）。
+        # ESPnet 的约束是 0 < min(idx) 且 max(idx) < num_blocks —— 不能挂第 0 层
+        # 和最后一层，我们这个取值符合。
+        self.inter_layers = {i for i in (1, 3) if i < num_blocks - 1}
+        # Self-conditioned CTC（arXiv 2104.02724）的反投影层。
+        # 按 ESPnet 官方实现（espnet2/asr/espnet_model.py）：
+        #     self.encoder.conditioning_layer = torch.nn.Linear(
+        #         vocab_size, self.encoder.output_size())
+        # 是**独立的新参数**、**所有注入点共享同一个**，不是权重绑定。
+        # 我一度想用 z @ ctc_lo.weight 做绑定来省这 37.1M 参数，但那在文献里
+        # 没有验证过；这一轮已经排除了太多假设，不该再引入未验证的变量。
+        self.self_cond = self_cond
+        self.conditioning_layer = (
+            nn.Linear(vocab_size, ctc_hidden) if self_cond else None
+        )
         self._init_bias()
 
     def _init_bias(self):
@@ -176,14 +192,38 @@ class CTCDecoder(nn.Module):
         mask[self.blank_id] = False
         self.ctc_lo.bias.data[mask] = 1.0
 
-    def forward(self, encoder_out, use_blocks=True):
+    def forward(self, encoder_out, use_blocks=True, return_intermediates=False):
+        """return_intermediates 只在训练时用（Intermediate CTC 正则）。
+
+        推理路径一个字节都没变：不传这个参数时行为与改动前完全相同，
+        ONNX 导出走的也是这条路径。中间层的分类器**复用** layer_norm 和
+        ctc_lo，所以参数量不增加一个，推理开销为零。
+
+        为什么做这个：CTC 假设各帧输出条件独立，模型没有任何机制保证相邻帧的
+        预测互相自洽 —— 表现出来就是叠字伪影（吐 X ␣ X 被合并规则还原成 XX）。
+        2026-09-09 实测我们在 FLEURS 日语上的叠字率 1.63%，参考是 0.25%、
+        Fun-ASR 是 0.46%，我们是它的 3.5 倍，而且在各语速桶里均匀出现。
+        给中间层也加 CTC 损失，等于要求每一层单独都能解码，逼各层的帧级预测
+        对齐到同一套标签上。见 arXiv 2102.03216。
+        """
         x = F.gelu(self.linear1(encoder_out))
         x = F.gelu(self.linear2(x))
+        inters = []
         if use_blocks:
-            for block in self.blocks:
+            for i, block in enumerate(self.blocks):
                 x = block(x)
+                if i in self.inter_layers and (return_intermediates or self.self_cond):
+                    inter_logits = self.ctc_lo(self.layer_norm(x))
+                    if return_intermediates:
+                        inters.append(inter_logits)
+                    if self.self_cond:
+                        # 把这一层的预测分布投影回隐藏维、加回主干。
+                        # 训练和推理都要走这条路 —— 它是模型的一部分，不是辅助损失。
+                        x = x + self.conditioning_layer(
+                            F.softmax(inter_logits.float(), dim=-1).to(x.dtype))
         x = self.layer_norm(x)
-        return self.ctc_lo(x)
+        out = self.ctc_lo(x)
+        return (out, inters) if return_intermediates else out
 
 
 class ManifestDataset(Dataset):
@@ -475,7 +515,9 @@ class CTCTrainer:
                  writer=None, wandb_run=None, wandb_log_checkpoints=False,
                  wandb_checkpoint_every=0, resume_lr=0.0,
                  ddp_no_sync=True, keep_encoder_bf16=True, compile_mode="default",
-                 bf16_log_softmax=False, fused_adamw=False,
+                 bf16_log_softmax=False, fused_adamw=False, inter_ctc_weight=0.0,
+                 specaug=False, specaug_freq_n=2, specaug_freq_w=16,
+                 specaug_time_n=2, specaug_time_w=40, specaug_time_ratio=0.1,
                  nvtx_profile=False, family=None):
         self.family = family or get_family("glm-asr")
         self.model_id = model_id
@@ -497,6 +539,13 @@ class CTCTrainer:
         self.ddp_no_sync = ddp_no_sync
         self.keep_encoder_bf16 = keep_encoder_bf16
         self.bf16_log_softmax = bf16_log_softmax
+        self.inter_ctc_weight = inter_ctc_weight
+        self.training_specaug = specaug
+        self.specaug_freq_n = specaug_freq_n
+        self.specaug_freq_w = specaug_freq_w
+        self.specaug_time_n = specaug_time_n
+        self.specaug_time_w = specaug_time_w
+        self.specaug_time_ratio = specaug_time_ratio
         self.nvtx_profile = nvtx_profile
         self.max_ctc_target_ratio = float(os.environ.get("MAX_CTC_TARGET_RATIO", "1.0"))
         self.skipped_ctc_samples = 0
@@ -575,8 +624,46 @@ class CTCTrainer:
             p.requires_grad = False
 
     @torch.no_grad()
+    def _specaugment(self, feats):
+        """SpecAugment（arXiv 1904.08779），只在训练期对送进编码器的 mel 做遮蔽。
+
+        我们的编码器是冻结的，遮的是它的**输入**而不是输出 —— 这样每步看到的
+        编码器表示都不同，增广更接近论文验证过的形式；遮输出只扰动头的输入，
+        物理意义弱一些。训练时本来就是逐 batch 现算编码器特征，不额外花钱。
+
+        为什么对症：我们的错误画像是帧级预测彼此不自洽（FLEURS 日语上叠字率
+        1.63%，参考 0.25%、Fun-ASR 0.46%）。时间遮蔽逼模型不能只看单帧决策，
+        必须用上下文补出被抹掉的部分，和 Intermediate CTC 从两个方向治同一个病。
+
+        输入形状是 Qwen3-ASR 的 [128, ΣT]（时间维拼接的 2D 张量），
+        所以时间维是 dim=-1、频率维是 dim=0。
+        """
+        if not self.training_specaug or not self.ctc_decoder.training:
+            return feats
+        f = feats.clone()
+        n_mel, n_t = f.shape[0], f.shape[-1]
+        # 用全局 RNG，不要新建 Generator —— 新建的未播种 Generator 是固定种子，
+        # 每次会遮在完全相同的位置，增广直接失效。
+        ri = lambda hi: int(torch.randint(0, hi, (1,)).item())
+        for _ in range(self.specaug_freq_n):
+            w = ri(self.specaug_freq_w + 1)
+            if w == 0 or w >= n_mel:
+                continue
+            f0 = ri(n_mel - w)
+            f[f0:f0 + w, :] = 0.0
+        # 时间遮蔽宽度同时受比例约束，避免短句被整段抹掉。
+        max_t = min(self.specaug_time_w, max(1, int(n_t * self.specaug_time_ratio)))
+        for _ in range(self.specaug_time_n):
+            w = ri(max_t + 1)
+            if w == 0 or w >= n_t:
+                continue
+            t0 = ri(n_t - w)
+            f[:, t0:t0 + w] = 0.0
+        return f
+
     def extract_encoder_features(self, input_features, feature_lens=None):
         self._load_encoder()
+        input_features = self._specaugment(input_features)
         with torch.amp.autocast(device_type(), dtype=self.dtype):
             hidden = self.family.encode(
                 self.encoder, input_features, feature_lens, self.device
@@ -597,6 +684,10 @@ class CTCTrainer:
         # (the pre-2026-08 behaviour) scaled the number by the batch token count
         # and made it incomparable across batch sizes.
         total_loss = torch.zeros((), device=self.device)
+        # 开 InterCTC 后 total_loss 是加权混合值，跨轮不可比，也看不出主路径有没有
+        # 在进步。主/辅两路各自单独累一份，只用于日志。
+        total_main = torch.zeros((), device=self.device)
+        total_inter = torch.zeros((), device=self.device)
         total_batches = 0
         total_tokens = 0
         t0 = time.time()
@@ -618,7 +709,13 @@ class CTCTrainer:
             with sync_context:
                 with nvtx_range("02_decoder_forward_to_logits", self.nvtx_profile):
                     with torch.amp.autocast(device_type(), dtype=self.dtype):
-                        logits = model(encoder_out, use_blocks=self.use_blocks)
+                        if self.inter_ctc_weight > 0:
+                            logits, inter_logits = model(
+                                encoder_out, use_blocks=self.use_blocks,
+                                return_intermediates=True)
+                        else:
+                            logits = model(encoder_out, use_blocks=self.use_blocks)
+                            inter_logits = []
                 with nvtx_range("03_ctc_log_probs", self.nvtx_profile):
                     log_probs = self.ctc_log_probs(logits)
                 input_lengths = input_lengths.clamp(max=log_probs.shape[0])
@@ -652,12 +749,29 @@ class CTCTrainer:
                         input_lengths = input_lengths[valid_mask]
 
                 with nvtx_range("05_ctc_loss", self.nvtx_profile):
-                    loss = self.ctc_loss_fn(
-                        log_probs,
-                        targets.to(self.device),
-                        input_lengths,
-                        target_lengths.to(self.device),
-                    )
+                    tgt_dev = targets.to(self.device)
+                    tlen_dev = target_lengths.to(self.device)
+                    loss = self.ctc_loss_fn(log_probs, tgt_dev, input_lengths, tlen_dev)
+                    main_loss_detached = loss.detach()
+                    inter_loss_detached = None
+                    if inter_logits:
+                        # Intermediate CTC（arXiv 2102.03216）：中间层也要能独立解码。
+                        # CTC 假设各帧条件独立，模型没有机制保证相邻帧预测自洽，
+                        # 表现为叠字伪影（吐 X ␣ X，合并规则还原成 XX）。实测我们
+                        # 在 FLEURS 日语的叠字率 1.63%，参考 0.25%、Fun-ASR 0.46%。
+                        # 分类器复用 layer_norm 与 ctc_lo，不增加任何参数；辅助损失
+                        # 只在训练期存在，推理图与导出完全不变。
+                        inter_loss = 0.0
+                        for il in inter_logits:
+                            ilp = self.ctc_log_probs(il)
+                            if ilp.shape[1] != log_probs.shape[1]:
+                                ilp = ilp[:, valid_mask.to(ilp.device), :]
+                            inter_loss = inter_loss + self.ctc_loss_fn(
+                                ilp, tgt_dev, input_lengths, tlen_dev)
+                        inter_loss = inter_loss / len(inter_logits)
+                        inter_loss_detached = inter_loss.detach()
+                        w = self.inter_ctc_weight
+                        loss = (1.0 - w) * loss + w * inter_loss
                 loss = loss / self.grad_accum
 
                 with nvtx_range("06_backward_decoder", self.nvtx_profile):
@@ -666,6 +780,9 @@ class CTCTrainer:
             # .item() on every micro-step synchronises the GPU and serialises
             # the accumulation window; keep the running sum on device.
             total_loss += loss.detach() * self.grad_accum
+            total_main += main_loss_detached
+            if inter_loss_detached is not None:
+                total_inter += inter_loss_detached
             total_batches += 1
             total_tokens += int(target_lengths.sum())
 
@@ -695,16 +812,24 @@ class CTCTrainer:
                 and self.global_step > 0
                 and self.global_step % self.log_interval == 0
             ):
-                avg_loss = float(total_loss) / max(total_batches, 1)
+                nb = max(total_batches, 1)
+                avg_loss = float(total_loss) / nb
+                avg_main = float(total_main) / nb
+                avg_inter = float(total_inter) / nb
                 elapsed = time.time() - t0
                 steps_per_sec = (self.global_step - start_step) / max(elapsed, 1e-9)
                 lr = self.scheduler.get_last_lr()[0]
                 logger.info(
                     f"Epoch {epoch}/{total_epochs} | Step {self.global_step} | "
                     f"Loss {avg_loss:.4f} | LR {lr:.2e} | {steps_per_sec:.2f} step/s"
+                    + (f" | main {avg_main:.4f} inter {avg_inter:.4f}"
+                       if self.inter_ctc_weight > 0 else "")
                 )
                 if self.writer:
                     self.writer.add_scalar("train/loss", avg_loss, self.global_step)
+                    if self.inter_ctc_weight > 0:
+                        self.writer.add_scalar("train/loss_main", avg_main, self.global_step)
+                        self.writer.add_scalar("train/loss_inter", avg_inter, self.global_step)
                     self.writer.add_scalar("train/lr", lr, self.global_step)
                     self.writer.add_scalar("train/steps_per_sec", steps_per_sec, self.global_step)
                     self.writer.add_scalar("train/epoch", epoch, self.global_step)
@@ -795,6 +920,10 @@ class CTCTrainer:
                 "num_heads": (self.ctc_decoder.blocks[0].num_heads
                               if len(self.ctc_decoder.blocks) else None),
                 "vocab_size": self.ctc_decoder.ctc_lo.out_features,
+                # self_cond 会改推理图（conditioning_layer 参与前向），重建方必须
+                # 知道。和 encoder_dim / ffn_hidden 是同一类教训：没存进 config 的
+                # 结构超参，评测和导出就只能猜。
+                "self_cond": self.ctc_decoder.conditioning_layer is not None,
                 "blank_id": self.blank_id,
             },
         }
@@ -867,9 +996,48 @@ class CTCTrainer:
                 f"run builds a {model_vocab}-class decoder. Wrong checkpoint for this "
                 f"tokenizer (char-vocab checkpoints are not resumable here)."
             )
-        self.ctc_decoder.load_state_dict(checkpoint["ctc_decoder"])
+        # 允许 conditioning_layer 缺失（从没开自条件的 checkpoint 接续时它是新层，
+        # 随机初始化即可），但其余键仍然严格校验 —— 放任所有键可缺会掩盖真正的
+        # 加载错误（比如词表或维度对不上）。
+        missing, unexpected = self.ctc_decoder.load_state_dict(
+            checkpoint["ctc_decoder"], strict=False)
+        allowed = {k for k in missing if k.startswith("conditioning_layer.")}
+        bad_missing = [k for k in missing if k not in allowed]
+        if bad_missing or unexpected:
+            raise RuntimeError(
+                f"checkpoint 与模型结构不匹配：缺失 {bad_missing}，多余 {list(unexpected)}")
+        if allowed and is_rank0():
+            logger.info("conditioning_layer 是新增层，随机初始化：%s", sorted(allowed))
         if "optimizer" in checkpoint:
-            self.optimizer.load_state_dict(checkpoint["optimizer"])
+            osd = checkpoint["optimizer"]
+            n_saved = sum(len(g["params"]) for g in osd["param_groups"])
+            n_cur = sum(len(g["params"])
+                        for g in self.optimizer.state_dict()["param_groups"])
+            if n_saved != n_cur:
+                # 开 --self-cond 从旧 checkpoint 接续时会走到这里：优化器多出
+                # conditioning_layer 两个张量，torch 只按「组内参数个数」比对，
+                # 直接 load 会报 "parameter group that doesn't match the size"。
+                # conditioning_layer 在 __init__ 里最后注册，所以它排在
+                # parameters() 末尾，旧 state 的索引 0..n_saved-1 仍然一一对应。
+                # 把尾部新参数的索引补进最后一个 group、不给 state（AdamW 首次
+                # step 惰性建）—— 4,830 万个旧参数的一阶/二阶矩全部保住，
+                # 不用从零重新预热动量。
+                names = [n for n, _ in self.ctc_decoder.named_parameters()]
+                extra = names[n_saved:]
+                if len(extra) != n_cur - n_saved or not all(
+                        e.startswith("conditioning_layer.") for e in extra):
+                    raise RuntimeError(
+                        f"optimizer state 比当前模型少 {n_cur - n_saved} 项，但末尾"
+                        f"新参数是 {extra}，不是预期的 conditioning_layer.*；"
+                        "拒绝猜测索引对齐")
+                osd = copy.deepcopy(osd)
+                osd["param_groups"][-1]["params"] = (
+                    list(osd["param_groups"][-1]["params"])
+                    + list(range(n_saved, n_cur)))
+                if is_rank0():
+                    logger.info("optimizer state 补 %d 个新参数槽位（%s），"
+                                "旧动量全部保留", len(extra), ", ".join(extra))
+            self.optimizer.load_state_dict(osd)
         if "scheduler" in checkpoint:
             self.scheduler.load_state_dict(checkpoint["scheduler"])
             # load_state_dict 把 base_lrs 也一起恢复了，所以 resume 之后 --lr 是
@@ -994,6 +1162,27 @@ def main():
     parser.add_argument("--ctc-ffn", type=int, default=128)
     parser.add_argument("--ctc-proj", type=int, default=2048)
     parser.add_argument("--dropout", type=float, default=0.1)
+    # Intermediate CTC 的权重。0 = 关闭（默认，行为与改动前完全一致）。
+    # 论文常用 0.3；只影响训练，推理路径与 ONNX 导出不受影响。
+    parser.add_argument("--inter-ctc-weight", type=float, default=0.0)
+    # Self-conditioned CTC：把中间层预测投影回主干。会新增
+    # vocab_size x ctc_hidden = 37.1M 参数，并改变推理图（导出时要一起带上）。
+    parser.add_argument("--self-cond", action="store_true")
+    # 额外的、固定的日语验证集，只用于监控，不参与 best.pt 的选择。
+    # 主 val 集是从全部训练数据里 random_split 出来的 2%，混了 15 个语种，
+    # 而且每轮数据集一变它的构成就变 —— 既看不出日语进展，也不能跨轮比较。
+    parser.add_argument("--ja-val-manifest", default=None)
+    parser.add_argument("--ja-val-max", type=int, default=2000)
+    # SpecAugment。默认关闭，行为与改动前完全一致。只在训练期生效。
+    # 论文的 F=27 是给 80 维 mel 设的；我们是 128 维，但两次频率遮蔽会盖掉
+    # 42% 的频带，叠加时间遮蔽后实测总遮蔽率 37%，过量。按 F=16、
+    # 时间比例 0.1 重新标定，实测总遮蔽率约 15%，与论文原配置相当。
+    parser.add_argument("--specaug", action="store_true")
+    parser.add_argument("--specaug-freq-n", type=int, default=2)
+    parser.add_argument("--specaug-freq-w", type=int, default=16)
+    parser.add_argument("--specaug-time-n", type=int, default=2)
+    parser.add_argument("--specaug-time-w", type=int, default=40)
+    parser.add_argument("--specaug-time-ratio", type=float, default=0.1)
     parser.add_argument("--max-audio-sec", type=float, default=30.0)
     parser.add_argument("--bucket-by-length", action=argparse.BooleanOptionalAction, default=True,
                         help="Group utterances of similar duration into a batch so that "
@@ -1193,6 +1382,7 @@ def main():
         ffn_hidden=args.ctc_ffn,
         vocab_size=total_classes,
         dropout=args.dropout,
+        self_cond=args.self_cond,
         blank_id=blank_id,
     )
     total_params = sum(p.numel() for p in ctc_decoder.parameters())
@@ -1214,6 +1404,24 @@ def main():
         )
 
     writer, wandb_run = setup_tracking(args, total_samples, len(train_ds), len(val_ds), total_params)
+
+    ja_val_loader = None
+    if args.ja_val_manifest and os.path.exists(args.ja_val_manifest):
+        ja_ds = ManifestDataset(
+            args.ja_val_manifest, tokenizer, token_map=token_map, unk_id=unk_id,
+            target_sr=feature_extractor.sampling_rate, max_audio_sec=args.max_audio_sec,
+        )
+        if len(ja_ds) > args.ja_val_max:
+            g = torch.Generator().manual_seed(1234)
+            idx = torch.randperm(len(ja_ds), generator=g)[:args.ja_val_max].tolist()
+            ja_ds = torch.utils.data.Subset(ja_ds, idx)
+        ja_val_loader = torch.utils.data.DataLoader(
+            ja_ds, batch_size=args.batch_size, shuffle=False,
+            num_workers=args.num_workers, collate_fn=collate,
+            pin_memory=False,
+        )
+        if is_rank0():
+            logger.info(f"日语监控验证集: {len(ja_ds)} 条 <- {args.ja_val_manifest}")
 
     planned_steps = (args.warmup_epochs + args.epochs) * len(train_loader) // args.grad_accum
     max_steps = max(1, args.lr_max_steps or planned_steps)
@@ -1244,6 +1452,13 @@ def main():
         compile_mode=args.compile_mode,
         bf16_log_softmax=args.bf16_log_softmax,
         fused_adamw=args.fused_adamw,
+        inter_ctc_weight=args.inter_ctc_weight,
+        specaug=args.specaug,
+        specaug_freq_n=args.specaug_freq_n,
+        specaug_freq_w=args.specaug_freq_w,
+        specaug_time_n=args.specaug_time_n,
+        specaug_time_w=args.specaug_time_w,
+        specaug_time_ratio=args.specaug_time_ratio,
         nvtx_profile=args.nvtx_profile,
     )
 
@@ -1322,9 +1537,24 @@ def main():
 
             if is_rank0():
                 logger.info(f"Epoch {epoch}/{args.epochs} | Train {train_loss:.4f} | Val {val_loss:.4f}")
+
+            # validate() 内部有 all_reduce，必须每个 rank 都进；日志和落盘才是
+            # rank0 专属。2026-09-09 我一度把 writer 和 best.pt 的保存缩进到了
+            # 这个 if 里、同时掉出了 is_rank0()，结果 7 个 rank 同时往同一个
+            # best.pt 写 580 MB。实测没写坏（各 rank 内容逐字节一致，互相覆盖
+            # 也还原成同一份，重新 load 正常），但那是运气，别再这么写。
+            ja_loss = None
+            if ja_val_loader is not None:
+                ja_loss = trainer.validate(ja_val_loader)
+
+            if is_rank0():
+                if ja_loss is not None:
+                    logger.info(f"Epoch {epoch}/{args.epochs} | 日语 Val {ja_loss:.4f}")
                 if writer:
                     writer.add_scalar("epoch/train_loss", train_loss, epoch)
                     writer.add_scalar("epoch/val_loss", val_loss, epoch)
+                    if ja_loss is not None:
+                        writer.add_scalar("epoch/ja_val_loss", ja_loss, epoch)
                     writer.flush()
                 if val_loss < best_loss:
                     best_loss = val_loss
